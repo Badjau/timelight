@@ -1,87 +1,65 @@
 # TimeLight
 
-## Project Summary
+TimeLight is a programmable visual timing system for speeches, presentations, debates, and other timed events. The PWA configures timing presets and communicates with a future Arduino Nano controller over USB serial. The controller drives WS2812 LEDs and a buzzer while keeping timer execution accurate if the browser is busy or disconnected.
 
-A programmable visual timing system designed for speech competitions, presentations, debates, and other timed events.
+## Current milestone
 
-The system uses a stoplight-style physical display divided into **3–5 illuminated sections**, with each section representing a different stage of the allotted time. Each section is illuminated using **WS2812 addressable LEDs**, allowing its color and behavior to be configured through software.
+The installable static PWA shell includes:
 
-For example, a four-stage configuration could use:
+- locally stored timing presets with 3–5 configurable stages;
+- reliable `MM:SS` timer inputs for total duration and stage thresholds;
+- Web Serial connection and handshake with an Arduino controller;
+- versioned newline-delimited JSON configuration and timer commands for one WS2812 pixel;
+- Start, pause, resume, reset, and next-stage controls;
+- device connection, error, and runtime status feedback;
+- offline operation after the installed shell has been opened once online.
 
-* **Blue** — beginning / safe time
-* **Yellow** — approaching the target
-* **Orange** — nearing the limit
-* **Red** — time limit reached
+The Arduino firmware, physical controls, preset import/export, and richer timer views are separate follow-up work. The PWA interface and protocol contract are ready for firmware integration.
 
-An **Arduino Nano** controls the LEDs and buzzer and communicates with a computer running a **Progressive Web App (PWA)**. The web application acts as the main control interface and allows the operator to configure and run timers without modifying the Arduino firmware.
+## Local development
 
-### Timer Presets
+Requires Node.js 20 or newer.
 
-The application can store presets for different competition categories or timing rules. Each preset can define:
+```sh
+npm ci
+npm run dev
+```
 
-* Contestant or speaker name
-* Timer/stage name
-* Total duration
-* Number of timing stages
-* Time at which each stage activates
-* Color assigned to each stage
-* Buzzer behavior
+Check the production build locally with:
 
-Example preset:
+```sh
+npm run build
+npm run preview
+```
 
-* Blue — 0:00
-* Yellow — 1:00
-* Orange — 2:00
-* Red — 3:00
+The preview uses the project path, so open `/timelight/` rather than a loose local `index.html` file.
 
-When the timer starts, the first section illuminates. As each configured threshold is reached, the previous section turns off and the next section activates.
+## Arduino connection
 
-A short buzzer notification sounds whenever the timer advances to a new stage. Once the final/red stage is reached, the buzzer can sound repeatedly at a configurable interval to indicate that the speaker has exceeded or reached the maximum allotted time.
+Use desktop Chrome or Microsoft Edge over the HTTPS production origin. Select **Connect device** in the Arduino controller panel and choose the Nano's USB serial port. The current hardware layout is one WS2812 pixel on D6 and a buzzer on D7. The default connection is `115200` baud. Opening the port can reset a Nano; the PWA waits for the firmware's versioned `ready` message before sending the preset or timer commands.
 
-### Controls
+The complete message contract is in [`docs/serial-protocol.md`](docs/serial-protocol.md), and Nano wiring/upload instructions are in [`arduino/README.md`](arduino/README.md). In brief, messages are UTF-8 JSON objects separated by newlines and use `version: 1`. The PWA sends `configure` and `timer` messages. The Arduino sends `ready`, `ack`, `status`, and `error` messages. The Arduino must continue its timer, LED, buzzer, and physical-button loops while parsing serial input.
 
-The system can be operated primarily through the web application, with controls such as:
+Some Nano variants use a CH340 USB-to-serial chip and may need an operating-system driver. Web Serial is not available in Firefox, Safari, or most mobile browsers; the interface reports this and directs operators to desktop Chrome or Edge.
 
-* Start
-* Pause
-* Resume
-* Reset
-* Manually advance to the next stage
-* Select or edit presets
-* View elapsed and remaining time
-* Display the current contestant/speaker
+## Offline installation and verification
 
-The physical unit can also include one or more buttons for standalone operation. At minimum, a button could reset the timer or manually advance the current light stage, allowing the device to remain usable even without the web interface.
+1. Open <https://badjau.github.io/timelight/> in desktop Chrome or Microsoft Edge.
+2. Use the browser's install control in the address bar or application menu.
+3. Open the installed TimeLight application once while online.
+4. Disable networking, close every TimeLight window, and launch it again.
+5. Confirm the shell opens and the status changes to **Offline · Running from the cached shell**.
 
-### Platform and Deployment Requirements
+The generated service worker precaches the complete build. There is no runtime API or runtime network cache. New builds use the service worker's waiting lifecycle: an update can download while the application is open, but it does not reload that application. Once all TimeLight windows are closed, the waiting worker can activate and the update appears on the next launch. Browser storage for future presets remains independent of these caches.
 
-* The hardware controller is an Arduino Nano. The MCU must not host the web interface and does not require Wi-Fi.
-* The control interface must be a static, installable PWA hosted using GitHub Pages.
-* Operators install the PWA from its HTTPS GitHub Pages URL using a supported desktop Chromium browser, primarily Google Chrome or Microsoft Edge.
-* After its first successful load, the PWA must remain fully usable without internet access. Its application shell and required assets must be cached by a service worker.
-* Wi-Fi and internet access must not be required while operating a timer. Runtime communication is exclusively over USB.
-* The deployment must not depend on opening a loose local `index.html` file. GitHub Pages is the canonical application origin for installation, updates, storage, and device permissions.
-* Updates to the web interface are deployed by publishing a new static build to GitHub Pages. The PWA must detect and activate updated cached assets without losing locally stored presets.
-* Presets and hardware settings must be stored locally in the browser. Operators must be able to export and import presets as JSON for backup and transfer between computers.
+## Deployment and rollback
 
-### USB Communication Requirements
+The canonical application origin is <https://badjau.github.io/timelight/>. GitHub Actions builds and deploys `dist/` from `main` through the protected `github-pages` environment. In repository settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
 
-* The PWA communicates with the Arduino Nano through its USB virtual serial port using the Web Serial API.
-* The first connection must be initiated by an explicit **Connect Device** action so the browser can display its required serial-port permission prompt.
-* The application must clearly show disconnected, connecting, connected, and communication-error states.
-* Serial messages must use a documented, versioned protocol. Prefer newline-delimited JSON commands and events so messages are easy to inspect and extend.
-* The default serial baud rate is `115200` unless hardware testing requires a different rate.
-* Opening the serial port may reset the Arduino Nano. The PWA must wait for a firmware `ready` message before sending configuration or timer commands.
-* The PWA must handle device disconnection and reconnection without losing the selected preset or current configuration.
-* The firmware must reject malformed or unsupported commands without blocking its timer, button, LED, or buzzer processing loops.
-* Web Serial browser support must be checked at startup. Unsupported browsers must receive a concise message directing the operator to desktop Chrome or Edge.
-* Some Nano variants use USB-to-serial chips such as CH340 and may require an operating-system driver. This dependency must be documented as part of hardware setup.
+Every push to `main` and every manual workflow dispatch builds and deploys the site. The workflow uses GitHub's Pages deployment identity token; no deployment credentials belong in this repository. Do not commit `dist/` or create a `gh-pages` branch.
 
-### Responsibility Boundaries
+If a deployment fails, GitHub Pages keeps serving the previous successful release. To roll back a successful but unwanted release, revert the responsible commit and push the revert to `main`, or redeploy the desired commit from the workflow's manual dispatch.
 
-* The PWA owns presets, contestant names, stage definitions, colors, thresholds, and buzzer configuration.
-* The Arduino owns real-time timer execution, LED output, buzzer output, physical-button handling, and the last configuration received from the PWA.
-* Once a timer has started, temporary browser rendering delays must not affect timing accuracy. The Arduino must use its own monotonic clock for active timer execution.
-* Physical controls must continue to work when the PWA is disconnected.
+## Responsibility boundaries
 
-The overall goal is to provide judges, speakers, and event organizers with an immediately understandable visual indication of timing status without requiring participants to constantly look at a clock.
+The PWA owns presets, speaker names, stage definitions, colors, thresholds, and buzzer configuration. The Arduino owns real-time timer execution, LED output, buzzer output, physical-button handling, and the last valid configuration received from the PWA. Once a timer starts, the Arduino uses its own monotonic clock; browser rendering delays must not affect timing accuracy.
