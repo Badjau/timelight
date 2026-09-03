@@ -6,7 +6,7 @@
 #include <string.h>
 
 const uint8_t LED_PIN = 6;
-const uint8_t BUZZER_PIN = 7;
+const uint8_t BUZZER_PIN = 5; //7 to use it;
 const uint8_t LED_COUNT = 12;
 const uint8_t MAX_STAGES = 5;
 const uint32_t BAUD_RATE = 115200;
@@ -362,7 +362,9 @@ void showStage(bool notify) {
 
 void updateStage() {
   uint32_t elapsed = elapsedSeconds();
-  uint8_t target = 0;
+  // Stage changes are one-way during a timer run. This also preserves a
+  // manually advanced stage until elapsed time reaches the next threshold.
+  uint8_t target = currentStage;
   while (target + 1 < stageCount && elapsed >= stages[target + 1].threshold) target++;
   if (target != currentStage) {
     currentStage = target;

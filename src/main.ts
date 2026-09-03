@@ -157,13 +157,15 @@ function bindEvents(): void {
   });
   document.querySelector('#stage-list')?.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    const card = target.closest<HTMLElement>('.stage-card');
+    const action = target.closest<HTMLButtonElement>('.stage-actions button');
+    if (!action) return;
+    const card = action.closest<HTMLElement>('.stage-card');
     if (!card) return;
     syncCurrentFromForm();
     const index = Number(card.dataset.index);
-    if (target.closest('.move-up')) [current.stages[index - 1], current.stages[index]] = [current.stages[index], current.stages[index - 1]];
-    if (target.closest('.move-down')) [current.stages[index], current.stages[index + 1]] = [current.stages[index + 1], current.stages[index]];
-    if (target.closest('.remove-stage')) current.stages.splice(index, 1);
+    if (action.classList.contains('move-up')) [current.stages[index - 1], current.stages[index]] = [current.stages[index], current.stages[index - 1]];
+    if (action.classList.contains('move-down')) [current.stages[index], current.stages[index + 1]] = [current.stages[index + 1], current.stages[index]];
+    if (action.classList.contains('remove-stage')) current.stages.splice(index, 1);
     render();
   });
   document.querySelector('#stage-list')?.addEventListener('input', (event) => {
