@@ -1,0 +1,73 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #eff6ff;
+  background: #08111f;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ink: #eff6ff;
+  --muted: #91a1b8;
+  --line: rgba(169, 194, 225, 0.17);
+  --panel: rgba(18, 34, 57, 0.72);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(circle at 78% 8%, #153052 0, transparent 32rem), #08111f;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.2;
+  background-image: linear-gradient(rgba(182, 210, 240, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(182, 210, 240, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  content: "";
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+}
+
+.page-shell { width: min(100% - 48px, 1080px); margin: 0 auto; }
+
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 30px 0; }
+.brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); font-size: 1.05rem; font-weight: 700; letter-spacing: -0.03em; text-decoration: none; }
+.brand-mark { display: inline-flex; gap: 4px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 10px; background: rgba(9, 18, 31, 0.68); }
+.lamp { width: 7px; height: 7px; border-radius: 50%; }
+.lamp-blue { background: #56a9ff; box-shadow: 0 0 8px #56a9ff; }
+.lamp-yellow { background: #ffd166; box-shadow: 0 0 8px #ffd166; }
+.lamp-red { background: #ff6678; box-shadow: 0 0 8px #ff6678; }
+.version { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+
+.hero { padding: clamp(72px, 13vw, 150px) 0 86px; max-width: 700px; }
+.eyebrow { display: flex; align-items: center; gap: 9px; color: #8fc8ff; font-size: 0.76rem; font-weight: 700; letter-spacing: 0.11em; text-transform: uppercase; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: #69b8ff; box-shadow: 0 0 0 5px rgba(105, 184, 255, 0.12), 0 0 14px #69b8ff; }
+h1 { margin: 23px 0 22px; color: #f4f8ff; font-size: clamp(3.4rem, 8vw, 6.75rem); font-weight: 650; letter-spacing: -0.085em; line-height: 0.94; }
+h1 em { color: #74baff; font-style: normal; }
+.intro { max-width: 510px; margin: 0; color: var(--muted); font-size: clamp(1rem, 2vw, 1.15rem); line-height: 1.65; }
+.status-card { display: inline-flex; align-items: center; gap: 10px; margin-top: 32px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 9px; background: rgba(18, 34, 57, 0.57); color: #c6d4e6; font-size: 0.84rem; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #68d391; box-shadow: 0 0 12px rgba(104, 211, 145, 0.9); }
+.status-dot.offline { background: #ffd166; box-shadow: 0 0 12px rgba(255, 209, 102, 0.8); }
+
+.stage-preview { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: var(--panel); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.2); }
+.stage-header, .stage-footer { display: flex; justify-content: space-between; gap: 16px; padding: 16px 20px; color: #d7e6f8; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.stage-note { color: var(--muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
+.stage-lights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; min-height: 130px; padding: 8px; background: rgba(3, 9, 17, 0.6); }
+.preview-light { display: block; border-radius: 8px; opacity: 0.88; }
+.preview-blue { background: linear-gradient(135deg, #3488de, #6dc1ff); box-shadow: 0 0 35px rgba(83, 169, 255, 0.3); }
+.preview-yellow { background: linear-gradient(135deg, #dda92e, #ffe28a); box-shadow: 0 0 35px rgba(255, 209, 102, 0.25); }
+.preview-orange { background: linear-gradient(135deg, #db732c, #ffaf61); box-shadow: 0 0 35px rgba(255, 145, 75, 0.25); }
+.preview-red { background: linear-gradient(135deg, #c94059, #ff7183); box-shadow: 0 0 35px rgba(255, 102, 120, 0.25); }
+.stage-footer { color: var(--muted); font-size: 0.68rem; font-weight: 500; letter-spacing: 0.01em; text-transform: none; }
+.footer { padding: 65px 0 30px; color: #66788f; font-size: 0.78rem; }
+
+@media (max-width: 620px) {
+  .page-shell { width: min(100% - 32px, 1080px); }
+  .topbar { padding-top: 20px; }
+  .hero { padding: 80px 0 60px; }
+  .stage-lights { min-height: 84px; }
+  .stage-header, .stage-footer { padding: 13px 14px; }
+  .stage-footer span:nth-child(2), .stage-footer span:nth-child(3) { display: none; }
+}
