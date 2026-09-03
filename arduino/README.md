@@ -9,7 +9,7 @@
 - WS2812 power and ground -> the appropriate 5 V supply and GND
 - Connect the Nano and the LED ground to a common ground
 
-The sketch configures a 12-pixel WS2812 strip. The PWA sends the active stage colors; the strip shows the current stage color and the buzzer follows its configured alert mode.
+The sketch configures a 150-pixel WS2812 strip. The PWA sends the active stage colors; the strip shows the current stage color and the buzzer follows its configured alert mode. In the five seconds leading up to a stage change, the strip gives a non-blocking breathing transition: the old color fades through several breaths, then the final breath rises in the new color.
 
 Install the **Adafruit NeoPixel** library from the Arduino IDE's Library Manager, select the correct Nano processor/port, and upload the sketch. Open the serial monitor at `115200` baud only for diagnostics; the PWA uses the same speed.
 

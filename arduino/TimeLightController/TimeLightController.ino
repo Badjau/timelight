@@ -6,8 +6,8 @@
 #include <string.h>
 
 const uint8_t LED_PIN = 6;
-const uint8_t BUZZER_PIN = 5; //7 to use it;
-const uint8_t LED_COUNT = 999;
+const uint8_t BUZZER_PIN = 7; //7 to use it;
+const uint8_t LED_COUNT = 100;
 const uint8_t MAX_STAGES = 5;
 const uint32_t BAUD_RATE = 115200;
 const uint32_t STATUS_INTERVAL_MS = 500;
