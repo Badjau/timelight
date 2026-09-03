@@ -1,6 +1,6 @@
 # TimeLight serial protocol
 
-The PWA communicates with the Arduino over a USB virtual serial port using **115200 baud, 8 data bits, no parity, and 1 stop bit**. The current hardware has one WS2812 pixel on D6 and a buzzer on D7. Every message is one UTF-8 JSON object followed by `\n`. The protocol version is currently `1`.
+The PWA communicates with the Arduino over a USB virtual serial port using **115200 baud, 8 data bits, no parity, and 1 stop bit**. The current hardware has a 12-pixel WS2812 strip on D6 and a buzzer on D7. Every message is one UTF-8 JSON object followed by `\n`. The protocol version is currently `1`.
 
 The Arduino should read complete lines without blocking its timer, LED, buzzer, or physical-button loop. Unknown message types, invalid JSON, and invalid fields should produce an `error` response and then be discarded.
 

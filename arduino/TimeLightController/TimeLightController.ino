@@ -1,4 +1,4 @@
-// TimeLight controller: one WS2812 pixel and one buzzer.
+// TimeLight controller: a WS2812 strip and one buzzer.
 // Hardware: WS2812 data in on D6, buzzer on D7.
 // Requires the Adafruit NeoPixel library.
 
@@ -7,7 +7,7 @@
 
 const uint8_t LED_PIN = 6;
 const uint8_t BUZZER_PIN = 5; //7 to use it;
-const uint8_t LED_COUNT = 12;
+const uint8_t LED_COUNT = 999;
 const uint8_t MAX_STAGES = 5;
 const uint32_t BAUD_RATE = 115200;
 const uint32_t STATUS_INTERVAL_MS = 500;
@@ -349,7 +349,8 @@ uint32_t elapsedSeconds() {
 
 void showStage(bool notify) {
   uint32_t color = stages[currentStage].color;
-  pixel.setPixelColor(0, pixel.Color((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF));
+  uint32_t stageColor = pixel.Color((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
+  for (uint16_t index = 0; index < LED_COUNT; index++) pixel.setPixelColor(index, stageColor);
   pixel.show();
   nextBuzzerMillis = 0;
   if (!notify) return;

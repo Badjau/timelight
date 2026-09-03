@@ -9,7 +9,7 @@ The installable static PWA shell includes:
 - locally stored timing presets with 3–5 configurable stages;
 - reliable `MM:SS` timer inputs for total duration and stage thresholds;
 - Web Serial connection and handshake with an Arduino controller;
-- versioned newline-delimited JSON configuration and timer commands for one WS2812 pixel;
+- versioned newline-delimited JSON configuration and timer commands for a 12-pixel WS2812 strip;
 - Start, pause, resume, reset, and next-stage controls;
 - device connection, error, and runtime status feedback;
 - offline operation after the installed shell has been opened once online.
@@ -36,7 +36,7 @@ The preview uses the project path, so open `/timelight/` rather than a loose loc
 
 ## Arduino connection
 
-Use desktop Chrome or Microsoft Edge over the HTTPS production origin. Select **Connect device** in the Arduino controller panel and choose the Nano's USB serial port. The current hardware layout is one WS2812 pixel on D6 and a buzzer on D7. The default connection is `115200` baud. Opening the port can reset a Nano; the PWA waits for the firmware's versioned `ready` message before sending the preset or timer commands.
+Use desktop Chrome or Microsoft Edge over the HTTPS production origin. Select **Connect device** in the Arduino controller panel and choose the Nano's USB serial port. The current hardware layout is a 12-pixel WS2812 strip on D6 and a buzzer on D7. The default connection is `115200` baud. Opening the port can reset a Nano; the PWA waits for the firmware's versioned `ready` message before sending the preset or timer commands.
 
 The complete message contract is in [`docs/serial-protocol.md`](docs/serial-protocol.md), and Nano wiring/upload instructions are in [`arduino/README.md`](arduino/README.md). In brief, messages are UTF-8 JSON objects separated by newlines and use `version: 1`. The PWA sends `configure` and `timer` messages. The Arduino sends `ready`, `ack`, `status`, and `error` messages. The Arduino must continue its timer, LED, buzzer, and physical-button loops while parsing serial input.
 
