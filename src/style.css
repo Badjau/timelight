@@ -103,6 +103,7 @@ body.live-open { overflow: hidden; }
 .live-header>div { flex: 1; }
 .live-kicker { color: #6684a2; font-size: .72rem; }
 .live-header h2 { margin: 7px 0 0; color: #eff6ff; font-size: 1.8rem; font-weight: 650; }
+.live-speaker { color: #f6fbff; font-size: clamp(1.8rem, 4vw, 3.6rem); font-weight: 750; letter-spacing: -.05em; line-height: 1.05; overflow-wrap: anywhere; text-align: right; }
 .live-state { padding: 8px 14px; border: 1px solid rgba(104, 211, 145, .2); border-radius: 99px; color: #83d29c; font-size: .88rem; }
 .live-layout { display: grid; grid-template-columns: 1fr 1.45fr; gap: 48px; padding-top: 38px; }
 .zone-label { display: block; margin-bottom: 13px; color: #6d87a1; font-size: .72rem; }
@@ -153,33 +154,67 @@ body.live-open { overflow: hidden; }
   .overview-fields { grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); margin-top: 0; }
   .stage-fields { grid-template-columns: 1.25fr .8fr .8fr; }
   .stage-fields label:last-child { display: none; }
+  .editor-card { padding: 30px 32px 26px; }
+  .overview-canvas { min-height: 0; padding: 34px 30px; }
+  .overview-layout { gap: 30px; }
+  .stage-row { gap: 13px; padding: 15px 14px; }
+  .stage-color { height: 42px; }
+  .stage-fields { gap: 11px; }
+  .stage-fields input, .stage-fields select { padding: 10px 11px; }
+  .icon-button { width: 31px; height: 31px; }
+  .editor-footer { padding-top: 25px; }
 }
 @media (max-width: 620px) {
   .page-shell { width: min(100% - 20px, 1160px); }
   .topbar { padding: 20px 0; }
   .wireframe-flow { padding-top: 35px; }
-  .editor-card, .live-card { padding: 20px 16px; }
+  .editor-card { padding: 18px 12px 20px; }
   .wireframe-toolbar { align-items: flex-start; flex-direction: column; gap: 13px; }
   .preset-control { width: 100%; }
   .preset-picker { flex: 1; width: auto; }
   .toolbar-actions { width: 100%; justify-content: flex-end; overflow-x: auto; }
-  .overview-canvas { min-height: 540px; padding: 22px 14px; }
+  .overview-canvas { min-height: 0; padding: 20px 10px; }
+  .overview-layout { gap: 24px; }
   .overview-fields { grid-template-columns: 1fr; max-width: none; }
-  .stage-row { grid-template-columns: 20px 6px minmax(0, 1fr) auto; gap: 8px; padding: 14px 8px; }
+  .stage-overview-heading { margin-bottom: 13px; }
+  .stage-row { grid-template-columns: 20px 6px minmax(0, 1fr) auto; gap: 8px; padding: 11px 7px; }
   .stage-fields { grid-template-columns: 1fr; }
   .stage-fields label:nth-child(3), .stage-fields label:nth-child(4) { display: none; }
+  .stage-fields input, .stage-fields select { margin-top: 6px; padding: 10px; }
+  .stage-color { height: 36px; }
   .stage-actions { flex-direction: column; }
+  .icon-button { width: 28px; height: 28px; font-size: .95rem; }
+  .add-stage { margin-top: 12px; }
   .editor-footer { align-items: flex-end; }
+  .editor-footer { padding-top: 22px; }
   .editor-footer>div:last-child { display: flex; flex-direction: column; gap: 7px; }
   .editor-footer .secondary-button { margin: 0; }
-  .live-header { align-items: flex-start; }
-  .live-layout { grid-template-columns: 1fr; gap: 23px; }
-  .big-control { min-height: 120px; }
-  .timer-zone { min-height: 260px; padding: 24px 16px; }
+  .live-overlay { padding: 0; place-items: stretch; overflow: hidden; }
+  .live-card { width: 100%; height: 100%; max-height: none; padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); overflow-y: auto; border: 0; border-radius: 0; }
+  .live-header { align-items: flex-start; gap: 10px; padding-bottom: 16px; }
+  .live-header h2 { font-size: 1.25rem; }
+  .live-speaker { max-width: 42%; font-size: 1.3rem; }
+  .live-state { padding: 6px 9px; font-size: .72rem; }
+  .live-layout { grid-template-columns: 1fr; gap: 14px; padding-top: 18px; }
+  .zone-label { margin-bottom: 8px; }
+  .big-control { grid-template-columns: 38px 1fr; min-height: 82px; padding: 14px; }
+  .big-control span { font-size: 2rem; }
+  .big-control b { font-size: 1.1rem; }
+  .big-control small { font-size: .72rem; }
+  .small-controls { gap: 6px; margin-top: 8px; }
+  .small-controls .secondary-button { margin-right: 2px; padding: 10px 12px; font-size: .78rem; }
+  .timer-zone { min-height: 0; padding: 18px 14px 16px; }
   .timer-display { display: block; }
-  .timer-display small { display: block; margin-top: 9px; }
+  .timer-display>span { font-size: clamp(3.8rem, 16vw, 6rem); }
+  .timer-display small { display: block; margin-top: 7px; font-size: .68rem; }
+  .progress-track { height: 7px; margin: 20px 0 16px; }
+  .stage-progress { gap: 6px; }
+  .stage-progress-item { padding-top: 8px; border-top-width: 2px; }
+  .stage-progress-item>span { width: 9px; height: 9px; margin-bottom: 6px; }
+  .stage-progress-item b { font-size: .68rem; }
+  .stage-progress-item small { margin-top: 3px; font-size: .64rem; }
+  .timer-note { margin-top: 18px; font-size: .8rem; }
+  .controller-zone { margin-top: 20px; }
   .controller-strip { align-items: flex-start; flex-direction: column; }
   .text-button.send-config { margin-left: 0; }
-  .live-overlay { padding: 10px; }
-  .live-card { max-height: calc(100vh - 20px); }
 }
