@@ -49,10 +49,11 @@ let localTimerElapsed = 0;
 let localTimerDuration = 0;
 
 function stageMarkup(stage: Stage, index: number): string {
-  return `<article class="stage-row" data-index="${index}" style="--stage-color:${stage.color}">
-    <span class="stage-number">${String(index + 1).padStart(2, '0')}</span><span class="stage-color" aria-hidden="true"></span>
-    <div class="stage-fields"><label>Stage name<input data-field="name" value="${escapeHtml(stage.name)}" maxlength="32" /></label><label>Starts at<input class="time-input" data-field="threshold" type="text" inputmode="numeric" maxlength="6" value="${formatTime(stage.threshold)}" /></label><label>Light color<div class="color-picker"><input data-field="color" type="color" value="${stage.color}" /><span>${stage.color}</span></div></label><label class="blink-field"><span>Blink </span><input data-field="blink" type="checkbox" ${stage.blink ? 'checked' : ''} /></label><label>Buzzer<select data-field="buzzer"><option value="none" ${stage.buzzer === 'none' ? 'selected' : ''}>No sound</option><option value="once" ${stage.buzzer === 'once' ? 'selected' : ''}>Chime once</option><option value="repeat" ${stage.buzzer === 'repeat' ? 'selected' : ''}>Repeat alert</option></select></label></div>
-    <div class="stage-actions"><button type="button" class="icon-button move-up" title="Move stage up" ${index === 0 ? 'disabled' : ''}>&uarr;</button><button type="button" class="icon-button move-down" title="Move stage down" ${index === current.stages.length - 1 ? 'disabled' : ''}>&darr;</button><button type="button" class="icon-button remove-stage" title="Remove stage" ${current.stages.length <= 3 ? 'disabled' : ''}>&times;</button></div>
+  return `<article class="stage-row ${index === 0 ? 'is-expanded' : ''}" data-index="${index}" style="--stage-color:${stage.color}">
+    <div class="stage-main"><span class="stage-number">${String(index + 1).padStart(2, '0')}</span><span class="stage-color" aria-hidden="true"></span>
+    <div class="stage-fields" id="stage-fields-${index}"><label>Stage name<input data-field="name" value="${escapeHtml(stage.name)}" maxlength="32" /></label><label>Starts at<input class="time-input" data-field="threshold" type="text" inputmode="numeric" maxlength="6" value="${formatTime(stage.threshold)}" /></label><label>Light color<div class="color-picker"><input data-field="color" type="color" value="${stage.color}" /><span>${stage.color}</span></div></label><label class="blink-field"><span>Blink </span><input data-field="blink" type="checkbox" ${stage.blink ? 'checked' : ''} /></label><label>Buzzer<select data-field="buzzer"><option value="none" ${stage.buzzer === 'none' ? 'selected' : ''}>No sound</option><option value="once" ${stage.buzzer === 'once' ? 'selected' : ''}>Chime once</option><option value="repeat" ${stage.buzzer === 'repeat' ? 'selected' : ''}>Repeat alert</option></select></label></div></div>
+    <div class="stage-summary"><button type="button" class="stage-toggle" data-stage-toggle aria-expanded="${index === 0}" aria-controls="stage-fields-${index}"><span class="stage-chevron" aria-hidden="true">&#8964;</span><span class="stage-summary-index">Stage ${index + 1}</span><strong class="stage-summary-name">${escapeHtml(stage.name || 'Untitled stage')}</strong><span class="stage-summary-threshold">${formatTime(stage.threshold)}</span><span class="stage-summary-color" aria-label="Light color ${stage.color}" title="Light color ${stage.color}"></span></button></div>
+    <div class="stage-actions"><button type="button" class="icon-button desktop-stage-action move-up" data-stage-action title="Move stage up" ${index === 0 ? 'disabled' : ''}>&uarr;</button><button type="button" class="icon-button desktop-stage-action move-down" data-stage-action title="Move stage down" ${index === current.stages.length - 1 ? 'disabled' : ''}>&darr;</button><button type="button" class="icon-button desktop-stage-action remove-stage" data-stage-action title="Remove stage" ${current.stages.length <= 3 ? 'disabled' : ''}>&times;</button><button type="button" class="icon-button stage-menu-toggle" data-stage-menu-toggle aria-label="Stage actions" aria-expanded="false">&#8942;</button><div class="stage-menu" hidden><button type="button" class="stage-menu-action move-up" data-stage-action ${index === 0 ? 'disabled' : ''}>Move up</button><button type="button" class="stage-menu-action move-down" data-stage-action ${index === current.stages.length - 1 ? 'disabled' : ''}>Move down</button><button type="button" class="stage-menu-action remove-stage" data-stage-action ${current.stages.length <= 3 ? 'disabled' : ''}>Delete stage</button></div></div>
   </article>`;
 }
 
@@ -120,8 +121,61 @@ function bindEvents(): void {
   document.querySelector('#reset-form')?.addEventListener('click', () => { current = structuredClone(revertTarget); saved = presets.some((preset) => preset.id === current.id); resetLocalTimer(); render(); });
   document.querySelector('#delete-preset')?.addEventListener('click', () => { presets = presets.filter((preset) => preset.id !== current.id); persist(); current = structuredClone(presets[0] ?? starter); revertTarget = structuredClone(current); saved = presets.length > 0; resetLocalTimer(); render(); });
   document.querySelector('#add-stage')?.addEventListener('click', () => { syncCurrentFromForm(); current.stages.push({ name: 'New stage', threshold: (current.stages[current.stages.length - 1]?.threshold || 0) + 60, color: colors[current.stages.length], blink: false, buzzer: 'once' }); saved = false; render(); });
-  document.querySelector('#stage-list')?.addEventListener('click', (event) => { const action = (event.target as HTMLElement).closest<HTMLButtonElement>('.stage-actions button'); const row = action?.closest<HTMLElement>('.stage-row'); if (!action || !row) return; syncCurrentFromForm(); const index = Number(row.dataset.index); if (action.classList.contains('move-up')) [current.stages[index - 1], current.stages[index]] = [current.stages[index], current.stages[index - 1]]; if (action.classList.contains('move-down')) [current.stages[index], current.stages[index + 1]] = [current.stages[index + 1], current.stages[index]]; if (action.classList.contains('remove-stage')) current.stages.splice(index, 1); saved = false; render(); });
-  document.querySelector('#stage-list')?.addEventListener('input', (event) => { const input = event.target as HTMLInputElement; if (input.dataset.field === 'color') { input.closest<HTMLElement>('.stage-row')?.style.setProperty('--stage-color', input.value); const label = input.parentElement?.querySelector('span'); if (label) label.textContent = input.value; } });
+  document.querySelector('#stage-list')?.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    const menuToggle = target.closest<HTMLButtonElement>('[data-stage-menu-toggle]');
+    if (menuToggle) {
+      const menu = menuToggle.parentElement?.querySelector<HTMLElement>('.stage-menu');
+      if (!menu) return;
+      const open = menu.hidden;
+      document.querySelectorAll<HTMLElement>('.stage-menu').forEach((item) => { item.hidden = true; });
+      document.querySelectorAll<HTMLButtonElement>('[data-stage-menu-toggle]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
+      menu.hidden = !open;
+      menuToggle.setAttribute('aria-expanded', String(open));
+      return;
+    }
+    const toggle = target.closest<HTMLButtonElement>('[data-stage-toggle]');
+    if (toggle) {
+      const row = toggle.closest<HTMLElement>('.stage-row');
+      if (!row) return;
+      const expanded = row.classList.toggle('is-expanded');
+      toggle.setAttribute('aria-expanded', String(expanded));
+      return;
+    }
+    const action = target.closest<HTMLButtonElement>('[data-stage-action]');
+    const row = action?.closest<HTMLElement>('.stage-row');
+    if (!action || !row || action.disabled) return;
+    syncCurrentFromForm();
+    const index = Number(row.dataset.index);
+    if (action.classList.contains('move-up')) [current.stages[index - 1], current.stages[index]] = [current.stages[index], current.stages[index - 1]];
+    if (action.classList.contains('move-down')) [current.stages[index], current.stages[index + 1]] = [current.stages[index + 1], current.stages[index]];
+    if (action.classList.contains('remove-stage')) current.stages.splice(index, 1);
+    saved = false;
+    render();
+  });
+  document.querySelector('#stage-list')?.addEventListener('input', (event) => {
+    const input = event.target as HTMLInputElement;
+    const row = input.closest<HTMLElement>('.stage-row');
+    if (!row) return;
+    if (input.dataset.field === 'color') {
+      row.style.setProperty('--stage-color', input.value);
+      const label = input.parentElement?.querySelector('span');
+      if (label) label.textContent = input.value;
+      const summaryColor = row.querySelector<HTMLElement>('.stage-summary-color');
+      if (summaryColor) {
+        summaryColor.setAttribute('aria-label', `Light color ${input.value}`);
+        summaryColor.title = `Light color ${input.value}`;
+      }
+    }
+    if (input.dataset.field === 'name') {
+      const summaryName = row.querySelector<HTMLElement>('.stage-summary-name');
+      if (summaryName) summaryName.textContent = input.value || 'Untitled stage';
+    }
+    if (input.dataset.field === 'threshold') {
+      const summaryThreshold = row.querySelector<HTMLElement>('.stage-summary-threshold');
+      if (summaryThreshold) summaryThreshold.textContent = input.value || '00:00';
+    }
+  });
    document.querySelector('#local-play')?.addEventListener('click', () => { const running = localTimerRunning || runtime?.state === 'running'; if (running) { pauseLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('pause'); } else { startLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('start'); } }); document.querySelector('#local-reset')?.addEventListener('click', () => { resetLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('reset'); }); document.querySelector('#local-next-stage')?.addEventListener('click', nextLocalStage);
    document.querySelector('#send-config')?.addEventListener('click', () => void sendConfiguration());
   document.querySelector('#device-connect')?.addEventListener('click', async () => { const button = document.querySelector<HTMLButtonElement>('#device-connect'); if (serial.status.state === 'connected') { await serial.disconnect(); return; } if (button) button.disabled = true; try { await serial.connect(); await sendConfiguration(); } catch { /* status listener provides the reason */ } finally { updateDeviceUi(serial.status); } });
