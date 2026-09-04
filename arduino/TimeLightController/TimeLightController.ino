@@ -12,6 +12,8 @@ const uint8_t MAX_STAGES = 5;
 const uint32_t BAUD_RATE = 115200;
 const uint32_t STATUS_INTERVAL_MS = 500;
 const uint32_t REPEAT_BUZZER_INTERVAL_MS = 3000;
+const uint16_t COLOR_TRANSITION_MS = 300;
+const uint8_t COLOR_TRANSITION_FRAME_MS = 10;
 const size_t RX_BUFFER_SIZE = 768;
 
 Adafruit_NeoPixel pixel(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -22,14 +24,15 @@ enum BuzzerMode : uint8_t { BUZZER_NONE, BUZZER_ONCE, BUZZER_REPEAT };
 struct Stage {
   uint32_t threshold;
   uint32_t color;
+  bool blink;
   BuzzerMode buzzer;
 };
 
 Stage stages[MAX_STAGES] = {
-  { 0, 0x56A9FF, BUZZER_NONE },
-  { 60, 0xFFD166, BUZZER_ONCE },
-  { 120, 0xFF914B, BUZZER_ONCE },
-  { 180, 0xFF6678, BUZZER_REPEAT },
+  { 0, 0x56A9FF, false, BUZZER_NONE },
+  { 60, 0xFFD166, false, BUZZER_ONCE },
+  { 120, 0xFF914B, false, BUZZER_ONCE },
+  { 180, 0xFF6678, false, BUZZER_REPEAT },
 };
 uint8_t stageCount = 4;
 uint32_t durationSeconds = 240;
@@ -43,6 +46,12 @@ uint32_t accumulatedMillis = 0;
 uint32_t runStartedMillis = 0;
 uint32_t nextBuzzerMillis = 0;
 uint32_t lastStatusMillis = 0;
+uint32_t displayedColor = 0;
+uint32_t transitionStartColor = 0;
+uint32_t transitionTargetColor = 0;
+uint32_t transitionStartedMillis = 0;
+uint32_t lastTransitionFrameMillis = 0;
+bool colorTransitionActive = false;
 
 struct Span {
   const char* begin;
@@ -208,6 +217,20 @@ bool readUnsigned(Span value, uint32_t& output) {
   return true;
 }
 
+bool readBoolean(Span value, bool& output) {
+  const char* cursor = value.begin;
+  skipWhitespace(cursor, value.end);
+  const char* start = cursor;
+  while (cursor < value.end && *cursor != ' ' && *cursor != '\t' && *cursor != '\r' && *cursor != '\n') cursor++;
+  const char* finish = cursor;
+  skipWhitespace(cursor, value.end);
+  if (cursor != value.end) return false;
+  if (sameText(start, finish - start, "true")) output = true;
+  else if (sameText(start, finish - start, "false")) output = false;
+  else return false;
+  return true;
+}
+
 bool readColor(Span value, uint32_t& output) {
   char color[8];
   if (!readJsonString(value, color, sizeof(color)) || color[0] != '#' || strlen(color) != 7) return false;
@@ -235,6 +258,8 @@ bool parseStage(Span object, Stage& output) {
   Span value;
   if (!findKey(object, "threshold", value) || !readUnsigned(value, output.threshold)) return false;
   if (!findKey(object, "color", value) || !readColor(value, output.color)) return false;
+  output.blink = false;
+  if (findKey(object, "blink", value) && !readBoolean(value, output.blink)) return false;
   if (!findKey(object, "buzzer", value) || !readBuzzer(value, output.buzzer)) return false;
   return true;
 }
@@ -347,11 +372,62 @@ uint32_t elapsedSeconds() {
   return elapsedMillis() / 1000UL;
 }
 
-void showStage(bool notify) {
-  uint32_t color = stages[currentStage].color;
+void setStripColor(uint32_t color) {
   uint32_t stageColor = pixel.Color((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
   for (uint16_t index = 0; index < LED_COUNT; index++) pixel.setPixelColor(index, stageColor);
   pixel.show();
+  displayedColor = color;
+}
+
+uint8_t blendChannel(uint8_t start, uint8_t target, uint16_t elapsed) {
+  int16_t difference = (int16_t)target - start;
+  return start + ((int32_t)difference * elapsed) / COLOR_TRANSITION_MS;
+}
+
+void updateColorTransition() {
+  if (!colorTransitionActive) return;
+
+  uint32_t now = millis();
+  uint32_t elapsed = now - transitionStartedMillis;
+  if (elapsed >= COLOR_TRANSITION_MS) {
+    setStripColor(transitionTargetColor);
+    colorTransitionActive = false;
+    return;
+  }
+  if (now - lastTransitionFrameMillis < COLOR_TRANSITION_FRAME_MS) return;
+  lastTransitionFrameMillis = now;
+
+  uint8_t red = blendChannel((transitionStartColor >> 16) & 0xFF, (transitionTargetColor >> 16) & 0xFF, elapsed);
+  uint8_t green = blendChannel((transitionStartColor >> 8) & 0xFF, (transitionTargetColor >> 8) & 0xFF, elapsed);
+  uint8_t blue = blendChannel(transitionStartColor & 0xFF, transitionTargetColor & 0xFF, elapsed);
+  setStripColor(((uint32_t)red << 16) | ((uint32_t)green << 8) | blue);
+}
+
+void startColorTransition(uint32_t target) {
+  if (target == displayedColor) return;
+  transitionStartColor = displayedColor;
+  transitionTargetColor = target;
+  transitionStartedMillis = millis();
+  lastTransitionFrameMillis = transitionStartedMillis;
+  colorTransitionActive = true;
+}
+
+void updateBlink() {
+  if (!stages[currentStage].blink || colorTransitionActive || stages[currentStage].color == 0) return;
+  startColorTransition(displayedColor == 0 ? stages[currentStage].color : 0);
+}
+
+void showStage(bool notify, bool transition) {
+  uint32_t color = stages[currentStage].color;
+  if (transition && color != displayedColor) {
+    // Continue smoothly from the currently displayed color if stages are
+    // advanced again before the previous transition has finished.
+    updateColorTransition();
+    startColorTransition(color);
+  } else {
+    colorTransitionActive = false;
+    setStripColor(color);
+  }
   nextBuzzerMillis = 0;
   if (!notify) return;
   if (stages[currentStage].buzzer == BUZZER_ONCE) tone(BUZZER_PIN, 2400, 130);
@@ -369,7 +445,7 @@ void updateStage() {
   while (target + 1 < stageCount && elapsed >= stages[target + 1].threshold) target++;
   if (target != currentStage) {
     currentStage = target;
-    showStage(true);
+    showStage(true, true);
   }
 }
 
@@ -396,7 +472,7 @@ void resetTimer() {
   noTone(BUZZER_PIN);
   accumulatedMillis = 0;
   currentStage = 0;
-  showStage(false);
+  showStage(false, false);
 }
 
 bool controlTimer(const char* action) {
@@ -427,7 +503,7 @@ bool controlTimer(const char* action) {
   }
   if (strcmp(action, "advance") == 0) {
     if (currentStage + 1 < stageCount) currentStage++;
-    showStage(true);
+    showStage(true, true);
     return true;
   }
   return false;
@@ -514,13 +590,15 @@ void setup() {
   pixel.show();
   Serial.begin(BAUD_RATE);
   delay(50);
-  showStage(false);
+  showStage(false, false);
   sendReady();
 }
 
 void loop() {
   readSerial();
   if (timerState == RUNNING) updateStage();
+  updateColorTransition();
+  updateBlink();
   updateBuzzer();
   if (millis() - lastStatusMillis >= STATUS_INTERVAL_MS) {
     lastStatusMillis = millis();

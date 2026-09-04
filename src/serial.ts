@@ -8,6 +8,7 @@ export type ControllerStage = {
   name: string;
   threshold: number;
   color: string;
+  blink?: boolean;
   buzzer: 'none' | 'once' | 'repeat';
 };
 
@@ -46,6 +47,7 @@ interface SerialPortLike {
 
 interface SerialLike {
   requestPort(): Promise<SerialPortLike>;
+  getPorts(): Promise<SerialPortLike[]>;
 }
 
 declare global {
@@ -87,7 +89,7 @@ export class ArduinoSerial {
     return () => this.messageListeners.delete(listener);
   }
 
-  async connect(): Promise<void> {
+  async connect(port?: SerialPortLike): Promise<void> {
     const serial = serialApi();
     if (!serial) {
       this.setStatus({ state: 'unsupported', message: 'Web Serial requires desktop Chrome or Edge' });
@@ -98,7 +100,7 @@ export class ArduinoSerial {
     this.setStatus({ state: 'connecting', message: 'Choose the TimeLight USB serial port' });
 
     try {
-      this.port = await serial.requestPort();
+      this.port = port ?? await serial.requestPort();
       await this.port.open({ baudRate: DEFAULT_BAUD_RATE });
       this.startReading();
       await this.waitForReady();
@@ -109,6 +111,15 @@ export class ArduinoSerial {
       this.setStatus({ state: 'error', message });
       throw error;
     }
+  }
+
+  async reconnect(): Promise<boolean> {
+    const serial = serialApi();
+    if (!serial) return false;
+    const ports = await serial.getPorts();
+    if (!ports.length) return false;
+    await this.connect(ports[0]);
+    return true;
   }
 
   async disconnect(): Promise<void> {

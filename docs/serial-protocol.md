@@ -21,10 +21,10 @@ Each command includes a unique `requestId`. The Arduino may acknowledge it with 
 Configure the active preset:
 
 ```json
-{"version":1,"requestId":"...","type":"configure","preset":{"name":"Four-minute speech","speaker":"Speaker name","duration":240,"stages":[{"name":"Beginning","threshold":0,"color":"#56a9ff","buzzer":"none"},{"name":"Time reached","threshold":180,"color":"#ff6678","buzzer":"repeat"}]}}
+{"version":1,"requestId":"...","type":"configure","preset":{"name":"Four-minute speech","speaker":"Speaker name","duration":240,"stages":[{"name":"Beginning","threshold":0,"color":"#56a9ff","blink":false,"buzzer":"none"},{"name":"Time reached","threshold":180,"color":"#ff6678","blink":true,"buzzer":"repeat"}]}}
 ```
 
-`duration` and each `threshold` are whole seconds from the start of the timer. Thresholds are ordered, start at zero or later, and must be less than `duration`. A preset has 3-5 stages. `buzzer` is one of `none`, `once`, or `repeat`; `color` is a six-digit CSS hex color.
+`duration` and each `threshold` are whole seconds from the start of the timer. Thresholds are ordered, start at zero or later, and must be less than `duration`. A preset has 3-5 stages. `buzzer` is one of `none`, `once`, or `repeat`; `color` is a six-digit CSS hex color. The optional boolean `blink` makes the light fade continuously on and off for that stage and defaults to `false` when omitted.
 
 Control the active timer:
 
