@@ -1,5 +1,6 @@
-// TimeLight controller: a WS2812 strip and one buzzer.
-// Hardware: WS2812 data in on D6, buzzer on D7.
+// TimeLight controller: a WS2812 strip, one buzzer, and two push buttons.
+// Hardware: WS2812 data in on D6, buzzer on D7, play/pause button on D4,
+// and next-stage button on D5. Buttons connect the pin to GND when pressed.
 // Requires the Adafruit NeoPixel library.
 
 #include <Adafruit_NeoPixel.h>
@@ -7,13 +8,17 @@
 
 const uint8_t LED_PIN = 6;
 const uint8_t BUZZER_PIN = 7; //7 to use it;
+const uint8_t PLAY_PAUSE_BUTTON_PIN = 6;
+const uint8_t NEXT_STAGE_BUTTON_PIN = 5;
 const uint8_t LED_COUNT = 100;
 const uint8_t MAX_STAGES = 5;
 const uint32_t BAUD_RATE = 115200;
 const uint32_t STATUS_INTERVAL_MS = 500;
-const uint32_t REPEAT_BUZZER_INTERVAL_MS = 3000;
+const uint32_t BUZZER_DELAY_MS = 3000;
+const uint16_t BUZZER_DURATION_MS = 800;
 const uint16_t COLOR_TRANSITION_MS = 300;
 const uint8_t COLOR_TRANSITION_FRAME_MS = 10;
+const uint16_t BUTTON_DEBOUNCE_MS = 35;
 const size_t RX_BUFFER_SIZE = 768;
 
 Adafruit_NeoPixel pixel(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -52,6 +57,16 @@ uint32_t transitionTargetColor = 0;
 uint32_t transitionStartedMillis = 0;
 uint32_t lastTransitionFrameMillis = 0;
 bool colorTransitionActive = false;
+
+struct ButtonState {
+  uint8_t pin;
+  bool lastReading;
+  bool stableReading;
+  uint32_t lastDebounceMillis;
+};
+
+ButtonState playPauseButton = { PLAY_PAUSE_BUTTON_PIN, HIGH, HIGH, 0 };
+ButtonState nextStageButton = { NEXT_STAGE_BUTTON_PIN, HIGH, HIGH, 0 };
 
 struct Span {
   const char* begin;
@@ -413,7 +428,7 @@ void startColorTransition(uint32_t target) {
 }
 
 void updateBlink() {
-  if (!stages[currentStage].blink || colorTransitionActive || stages[currentStage].color == 0) return;
+  if (timerState != RUNNING || !stages[currentStage].blink || colorTransitionActive || stages[currentStage].color == 0) return;
   startColorTransition(displayedColor == 0 ? stages[currentStage].color : 0);
 }
 
@@ -430,10 +445,10 @@ void showStage(bool notify, bool transition) {
   }
   nextBuzzerMillis = 0;
   if (!notify) return;
-  if (stages[currentStage].buzzer == BUZZER_ONCE) tone(BUZZER_PIN, 2400, 130);
+  if (stages[currentStage].buzzer == BUZZER_ONCE) tone(BUZZER_PIN, 2400, BUZZER_DURATION_MS);
   if (stages[currentStage].buzzer == BUZZER_REPEAT) {
-    tone(BUZZER_PIN, 2400, 180);
-    nextBuzzerMillis = millis() + REPEAT_BUZZER_INTERVAL_MS;
+    tone(BUZZER_PIN, 2400, BUZZER_DURATION_MS);
+    nextBuzzerMillis = millis() + BUZZER_DELAY_MS;
   }
 }
 
@@ -452,8 +467,8 @@ void updateStage() {
 void updateBuzzer() {
   if (timerState != RUNNING || stages[currentStage].buzzer != BUZZER_REPEAT || nextBuzzerMillis == 0) return;
   if ((int32_t)(millis() - nextBuzzerMillis) >= 0) {
-    tone(BUZZER_PIN, 2400, 180);
-    nextBuzzerMillis = millis() + REPEAT_BUZZER_INTERVAL_MS;
+    tone(BUZZER_PIN, 2400, BUZZER_DURATION_MS);
+    nextBuzzerMillis = millis() + BUZZER_DELAY_MS;
   }
 }
 
@@ -472,16 +487,18 @@ void resetTimer() {
   noTone(BUZZER_PIN);
   accumulatedMillis = 0;
   currentStage = 0;
-  showStage(false, false);
+  colorTransitionActive = false;
+  setStripColor(0);
 }
 
 bool controlTimer(const char* action) {
   if (strcmp(action, "start") == 0) {
     if (timerState != IDLE) return false;
     accumulatedMillis = 0;
+    currentStage = 0;
     runStartedMillis = millis();
     timerState = RUNNING;
-    updateStage();
+    showStage(false, false);
     return true;
   }
   if (strcmp(action, "pause") == 0) {
@@ -502,6 +519,7 @@ bool controlTimer(const char* action) {
     return true;
   }
   if (strcmp(action, "advance") == 0) {
+    if (timerState == IDLE) return false;
     if (currentStage + 1 < stageCount) currentStage++;
     showStage(true, true);
     return true;
@@ -581,21 +599,48 @@ void readSerial() {
   }
 }
 
+bool buttonPressed(ButtonState& button) {
+  bool reading = digitalRead(button.pin);
+  uint32_t now = millis();
+  if (reading != button.lastReading) {
+    button.lastDebounceMillis = now;
+    button.lastReading = reading;
+  }
+  if (now - button.lastDebounceMillis < BUTTON_DEBOUNCE_MS) return false;
+  if (reading == button.stableReading) return false;
+  button.stableReading = reading;
+  return reading == LOW;
+}
+
+void handleButtons() {
+  if (buttonPressed(playPauseButton)) {
+    const char* action = timerState == RUNNING ? "pause" : timerState == PAUSED ? "resume" : "start";
+    if (controlTimer(action)) sendStatus();
+  }
+  if (buttonPressed(nextStageButton)) {
+    if (controlTimer("advance")) sendStatus();
+  }
+}
+
 void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+  pinMode(PLAY_PAUSE_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(NEXT_STAGE_BUTTON_PIN, INPUT_PULLUP);
+  playPauseButton.lastReading = playPauseButton.stableReading = digitalRead(PLAY_PAUSE_BUTTON_PIN);
+  nextStageButton.lastReading = nextStageButton.stableReading = digitalRead(NEXT_STAGE_BUTTON_PIN);
   pixel.begin();
   pixel.setBrightness(80);
   pixel.clear();
   pixel.show();
   Serial.begin(BAUD_RATE);
   delay(50);
-  showStage(false, false);
   sendReady();
 }
 
 void loop() {
   readSerial();
+  handleButtons();
   if (timerState == RUNNING) updateStage();
   updateColorTransition();
   updateBlink();

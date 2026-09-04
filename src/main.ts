@@ -4,6 +4,7 @@ import './style.css';
 
 type Stage = { name: string; threshold: number; color: string; blink?: boolean; buzzer: 'none' | 'once' | 'repeat' };
 type Preset = ControllerPreset & { id: string; updatedAt: string };
+type TimerState = 'idle' | 'running' | 'paused';
 
 const STORAGE_KEY = 'timelight-presets-v1';
 const colors = ['#0000ff', '#ffff00', '#ff7b00', '#ff0000', '#b58cff'];
@@ -48,6 +49,8 @@ let localTimerStartedAt = 0;
 let localTimerElapsed = 0;
 let localTimerDuration = 0;
 let deviceCommandQueue: Promise<void> = Promise.resolve();
+let pendingDeviceTimer: { id: number; state: TimerState } | undefined;
+let nextDeviceCommandId = 0;
 
 function stageMarkup(stage: Stage, index: number): string {
   return `<article class="stage-row ${index === 0 ? 'is-expanded' : ''}" data-index="${index}" style="--stage-color:${stage.color}">
@@ -84,9 +87,17 @@ function showInvalid(): void { document.querySelector('.overview-canvas')?.class
 function updateEditorActions(): void { const save = document.querySelector<HTMLButtonElement>('#save-preset'); const revert = document.querySelector<HTMLButtonElement>('#reset-form'); if (save) save.disabled = saved; if (revert) revert.hidden = saved; }
 function savePreset(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } current.updatedAt = new Date().toISOString(); const existing = presets.findIndex((preset) => preset.id === current.id); if (existing >= 0) presets[existing] = structuredClone(current); else presets.unshift(structuredClone(current)); persist(); revertTarget = structuredClone(current); saved = true; render(); if (serial.status.state === 'connected') void sendConfiguration(); }
 async function sendConfiguration(): Promise<void> { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } try { await serial.sendConfiguration(current); } catch (error) { const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send the preset'; } }
-function handleDeviceCommand(command: TimerCommand): Promise<void> {
+function handleDeviceCommand(command: TimerCommand, targetState?: TimerState): Promise<void> {
+  const commandId = ++nextDeviceCommandId;
+  if (targetState) pendingDeviceTimer = { id: commandId, state: targetState };
   const task = deviceCommandQueue.then(async () => {
-    try { await serial.sendTimerCommand(command); } catch (error) { const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send timer command'; }
+    try {
+      await serial.sendTimerCommand(command);
+    } catch (error) {
+      if (pendingDeviceTimer?.id === commandId) pendingDeviceTimer = undefined;
+      const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send timer command';
+      updateTimerUi();
+    }
   });
   deviceCommandQueue = task;
   return task;
@@ -104,19 +115,19 @@ function updateTimerUi(): void {
   const finalStageThreshold = current.stages[current.stages.length - 1]?.threshold ?? 0;
   const progressDuration = finalStageThreshold > 0 ? finalStageThreshold : duration;
   const progressPercent = progressDuration > 0 ? Math.min(100, Math.max(0, safeElapsed / progressDuration * 100)) : 0;
-  const timerValue = document.querySelector('#timer-value'); const progress = document.querySelector<HTMLElement>('#timer-progress'); const progressTrack = progress?.parentElement; if (timerValue) timerValue.textContent = formatTime(safeElapsed); if (progress) progress.style.width = `${progressPercent}%`; if (progressTrack) progressTrack.setAttribute('aria-valuenow', progressPercent.toFixed(1)); const playIcon = document.querySelector('#play-icon'); const playLabel = document.querySelector('#play-label'); const playHint = document.querySelector('#play-hint'); const running = localTimerRunning || runtime?.state === 'running'; if (playIcon) playIcon.innerHTML = running ? '&#10074;&#10074;' : '&#9654;'; if (playLabel) playLabel.textContent = running ? 'Pause' : 'Play'; if (playHint) playHint.textContent = running ? 'pause timer' : 'start timer';
+  const timerValue = document.querySelector('#timer-value'); const progress = document.querySelector<HTMLElement>('#timer-progress'); const progressTrack = progress?.parentElement; if (timerValue) timerValue.textContent = formatTime(safeElapsed); if (progress) progress.style.width = `${progressPercent}%`; if (progressTrack) progressTrack.setAttribute('aria-valuenow', progressPercent.toFixed(1)); const playIcon = document.querySelector('#play-icon'); const playLabel = document.querySelector('#play-label'); const playHint = document.querySelector('#play-hint'); const connectedTimerState = pendingDeviceTimer?.state ?? runtime.state; const running = localTimerRunning || (serial.status.state === 'connected' && connectedTimerState === 'running'); if (playIcon) playIcon.innerHTML = running ? '&#10074;&#10074;' : '&#9654;'; if (playLabel) playLabel.textContent = running ? 'Pause' : 'Play'; if (playHint) playHint.textContent = running ? 'pause timer' : 'start timer';
   const stageIndex = current.stages.reduce((active, stage, index) => safeElapsed >= stage.threshold ? index : active, 0); document.querySelectorAll<HTMLElement>('[data-progress-index]').forEach((item, index) => item.classList.toggle('active', index === stageIndex)); const state = document.querySelector('#live-state'); if (state) state.textContent = localTimerRunning ? 'Running' : safeElapsed >= duration && duration > 0 ? 'Complete' : safeElapsed > 0 ? 'Paused' : 'Ready';
 }
 function startLocalTimer(): void { if (localTimerRunning) return; localTimerDuration = configuredTimerDuration(); localTimerStartedAt = Date.now(); localTimerRunning = true; timerInterval = window.setInterval(updateTimerUi, 250); updateTimerUi(); }
 function pauseLocalTimer(): void { if (!localTimerRunning) return; localTimerElapsed += (Date.now() - localTimerStartedAt) / 1000; localTimerRunning = false; if (timerInterval) window.clearInterval(timerInterval); timerInterval = undefined; updateTimerUi(); }
 function configuredTimerDuration(): number { return Number.isFinite(current.duration) && current.duration > 0 ? current.duration : 0; }
 function resetLocalTimer(): void { localTimerRunning = false; localTimerElapsed = 0; localTimerDuration = 0; if (timerInterval) window.clearInterval(timerInterval); timerInterval = undefined; updateTimerUi(); }
-function nextLocalStage(): void { const elapsed = localTimerRunning ? localTimerElapsed + (Date.now() - localTimerStartedAt) / 1000 : localTimerElapsed; const next = current.stages.find((stage) => stage.threshold > elapsed + 0.1); if (!next) return; localTimerElapsed = next.threshold; if (localTimerRunning) localTimerStartedAt = Date.now(); updateTimerUi(); if (serial.status.state === 'connected') void handleDeviceCommand('advance'); }
-function openLiveView(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } resetLocalTimer(); const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (!overlay) return; overlay.hidden = false; document.body.classList.add('live-open'); window.setTimeout(() => document.querySelector<HTMLButtonElement>('#local-play')?.focus(), 0); updateTimerUi(); }
+function nextLocalStage(): void { if (!localTimerRunning && (serial.status.state !== 'connected' || (runtime.state !== 'running' && runtime.state !== 'paused'))) return; const elapsed = localTimerRunning ? localTimerElapsed + (Date.now() - localTimerStartedAt) / 1000 : localTimerElapsed; const next = current.stages.find((stage) => stage.threshold > elapsed + 0.1); if (!next) return; localTimerElapsed = next.threshold; if (localTimerRunning) localTimerStartedAt = Date.now(); updateTimerUi(); if (serial.status.state === 'connected') void handleDeviceCommand('advance'); }
+async function openLiveView(): Promise<void> { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } if (serial.status.state === 'connected') await sendConfiguration(); resetLocalTimer(); const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (!overlay) return; overlay.hidden = false; document.body.classList.add('live-open'); window.setTimeout(() => document.querySelector<HTMLButtonElement>('#local-play')?.focus(), 0); updateTimerUi(); }
 function stopLiveTimer(): void {
-  const wasRunning = localTimerRunning || runtime.state === 'running';
+  const shouldResetDeviceTimer = serial.status.state === 'connected' && (pendingDeviceTimer?.state ?? runtime.state) !== 'idle';
   resetLocalTimer();
-  if (wasRunning && serial.status.state === 'connected') void handleDeviceCommand('reset');
+  if (shouldResetDeviceTimer) void handleDeviceCommand('reset', 'idle');
 }
 function closeLiveView(): void {
   const overlay = document.querySelector<HTMLElement>('#live-overlay');
@@ -132,7 +143,7 @@ function bindEvents(): void {
   document.querySelector('.editor-card')?.addEventListener('input', () => { saved = false; updateEditorActions(); });
   document.querySelector('#new-preset')?.addEventListener('click', () => { current = { id: crypto.randomUUID(), name: '', speaker: '', duration: 240, stages: structuredClone(defaultStages), updatedAt: '' }; revertTarget = structuredClone(current); saved = false; resetLocalTimer(); render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
   document.querySelector('#duplicate-preset')?.addEventListener('click', () => { syncCurrentFromForm(); current = { ...structuredClone(current), id: crypto.randomUUID(), name: `${current.name || 'Untitled preset'} copy`, updatedAt: '' }; revertTarget = structuredClone(current); saved = false; resetLocalTimer(); render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
-  document.querySelector('#play-preset')?.addEventListener('click', openLiveView);
+  document.querySelector('#play-preset')?.addEventListener('click', () => void openLiveView());
   document.querySelector('#back-to-editor')?.addEventListener('click', closeLiveView);
   document.querySelector('#live-overlay')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeLiveView(); });
   document.querySelector('#save-preset')?.addEventListener('click', savePreset);
@@ -194,12 +205,22 @@ function bindEvents(): void {
       if (summaryThreshold) summaryThreshold.textContent = input.value || '00:00';
     }
   });
-   document.querySelector('#local-play')?.addEventListener('click', () => { const running = localTimerRunning || runtime?.state === 'running'; if (running) { pauseLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('pause'); } else { startLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('start'); } }); document.querySelector('#local-reset')?.addEventListener('click', () => { resetLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('reset'); }); document.querySelector('#local-next-stage')?.addEventListener('click', nextLocalStage);
+   document.querySelector('#local-play')?.addEventListener('click', () => {
+    if (serial.status.state === 'connected') {
+      const state = pendingDeviceTimer?.state ?? runtime.state;
+      if (state === 'running') void handleDeviceCommand('pause', 'paused');
+      else if (state === 'paused') void handleDeviceCommand('resume', 'running');
+      else void handleDeviceCommand('start', 'running');
+      return;
+    }
+    if (localTimerRunning) pauseLocalTimer();
+    else startLocalTimer();
+   }); document.querySelector('#local-reset')?.addEventListener('click', () => { resetLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('reset', 'idle'); }); document.querySelector('#local-next-stage')?.addEventListener('click', nextLocalStage);
    document.querySelector('#send-config')?.addEventListener('click', () => void sendConfiguration());
   document.querySelector('#device-connect')?.addEventListener('click', async () => { const button = document.querySelector<HTMLButtonElement>('#device-connect'); if (serial.status.state === 'connected') { await serial.disconnect(); return; } if (button) button.disabled = true; try { await serial.connect(); await sendConfiguration(); } catch { /* status listener provides the reason */ } finally { updateDeviceUi(serial.status); } });
 }
 
 function updateDeviceUi(status: SerialStatus): void { const badge = document.querySelector('#device-badge'); const state = document.querySelector('#device-state'); const connect = document.querySelector<HTMLButtonElement>('#device-connect'); const detail = document.querySelector('#device-detail'); if (!badge || !state || !connect) return; const connected = status.state === 'connected'; badge.className = `device-badge ${status.state}`; state.textContent = status.message; if (detail) { detail.textContent = status.firmware ? `Firmware ${status.firmware}` : 'Optional USB controller'; detail.classList.toggle('is-error', status.state === 'error'); } connect.disabled = status.state === 'connecting' || status.state === 'unsupported'; connect.title = connected ? 'Disconnect Arduino controller' : 'Connect an Arduino controller'; connect.setAttribute('aria-label', connect.title); connect.innerHTML = controllerConnectIcon; document.querySelectorAll<HTMLButtonElement>('[data-command], #send-config').forEach((button) => { button.disabled = status.state !== 'connected'; }); }
-function updateRuntime(message: DeviceMessage): void { if (message.type !== 'status') return; runtime = message as DeviceStatusMessage; if (serial.status.state === 'connected' && !localTimerRunning) { localTimerElapsed = runtime.elapsed ?? 0; updateTimerUi(); } }
+function updateRuntime(message: DeviceMessage): void { if (message.type === 'error') { pendingDeviceTimer = undefined; updateTimerUi(); return; } if (message.type !== 'status') return; runtime = message as DeviceStatusMessage; if (pendingDeviceTimer && runtime.state === pendingDeviceTimer.state) pendingDeviceTimer = undefined; if (serial.status.state === 'connected' && !localTimerRunning) { localTimerElapsed = runtime.elapsed ?? 0; updateTimerUi(); } }
 
 serial.onStatus(updateDeviceUi); serial.onMessage(updateRuntime); render(); window.setTimeout(() => { if (serial.status.state === 'disconnected') void serial.reconnect().catch(() => undefined); }, 0); window.addEventListener('click', (event) => { const picker = document.querySelector('.preset-picker'); if (picker?.contains(event.target as Node)) return; const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (menu && toggle) { menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } }); window.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeLiveView(); }); registerSW({ immediate: true, onNeedRefresh: () => { document.body.dataset.updateWaiting = 'true'; } });

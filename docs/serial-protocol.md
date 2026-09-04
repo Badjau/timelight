@@ -1,6 +1,6 @@
 # TimeLight serial protocol
 
-The PWA communicates with the Arduino over a USB virtual serial port using **115200 baud, 8 data bits, no parity, and 1 stop bit**. The current hardware has a 12-pixel WS2812 strip on D6 and a buzzer on D7. Every message is one UTF-8 JSON object followed by `\n`. The protocol version is currently `1`.
+The PWA communicates with the Arduino over a USB virtual serial port using **115200 baud, 8 data bits, no parity, and 1 stop bit**. The current hardware has a WS2812 strip on D6, a buzzer on D7, a play/pause button on D4, and a next-stage button on D5. Every message is one UTF-8 JSON object followed by `\n`. The protocol version is currently `1`.
 
 The Arduino should read complete lines without blocking its timer, LED, buzzer, or physical-button loop. Unknown message types, invalid JSON, and invalid fields should produce an `error` response and then be discarded.
 
@@ -55,6 +55,8 @@ The Arduino may periodically report timer state (recommended at 2-4 times per se
 ```
 
 `state` is `idle`, `running`, or `paused`. `elapsed` is whole seconds and `stage` is a zero-based stage index. Status messages are informational and do not need an acknowledgement.
+
+While the timer is idle, the strip is off. It shows stage 1 only when a timer `start` action is accepted. The D4 button is equivalent to play/pause: it starts an idle timer, pauses a running timer, and resumes a paused timer. The D5 button is equivalent to `advance` and works while the timer is running or paused. Both buttons use the Arduino's internal pull-up and should connect their input pin to GND when pressed.
 
 ## Ownership and recovery
 
