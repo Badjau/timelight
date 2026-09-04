@@ -35,7 +35,7 @@ button { cursor: pointer; }
 .wireframe-card { width: 100%; min-height: 0; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 25px 75px rgba(0, 0, 0, .14); }
 .editor-card { display: flex; height: 100%; min-height: 0; padding: clamp(14px, 2vw, 24px) clamp(12px, 2vw, 24px) clamp(16px, 2vw, 22px); flex-direction: column; }
 .wireframe-toolbar, .editor-footer, .live-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.wireframe-toolbar { min-height: 42px; }
+.wireframe-toolbar { min-height: 42px; flex: 0 0 auto; }
 .preset-control { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .zone-label, .live-kicker { color: #7e9ab8; font-size: .75rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .preset-picker { position: relative; width: min(360px, 35vw); }
@@ -61,8 +61,8 @@ button { cursor: pointer; }
 .saved-preset { width: 100%; padding: 10px 11px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #9aacc0; font-size: .8rem; text-align: left; }
 .saved-preset:hover, .saved-preset.active { border-color: rgba(116, 186, 255, .28); background: rgba(72, 132, 194, .14); color: #b9ddff; }
 
-.overview-canvas { display: flex; min-height: 0; flex: 1 1 auto; padding: clamp(14px, 2vw, 26px); border: 1px solid rgba(169, 194, 225, .2); border-radius: 10px; background: rgba(7, 17, 30, .3); transition: border-color .2s; }
-.overview-canvas.invalid { border-color: #ff6678; animation: shake .28s ease-in-out 2; }
+.overview-canvas { display: flex; min-height: 0; flex: 1 1 auto; padding: 0; border: 0; border-radius: 0; background: transparent; transition: border-color .2s; }
+.overview-canvas.invalid { border: 0; animation: shake .28s ease-in-out 2; }
 .overview-layout { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: clamp(18px, 2vw, 26px); }
 .overview-summary { padding: 0; }
 .overview-fields { display: grid; grid-template-columns: minmax(280px, 1.15fr) minmax(220px, .85fr); gap: 12px; margin-top: 0; max-width: 920px; }
@@ -94,7 +94,7 @@ input:focus, select:focus { border-color: #5ca5e7; box-shadow: 0 0 0 3px rgba(92
 .icon-button:disabled { cursor: not-allowed; opacity: .25; }
 .add-stage { margin-top: 18px; padding: 8px 0; border: 0; background: transparent; color: #8fc8ff; font-size: .88rem; font-weight: 700; }
 .add-stage:disabled { color: #526b85; cursor: not-allowed; }
-.editor-footer { justify-content: center; padding: 18px 4px 0; }
+.editor-footer { flex: 0 0 auto; justify-content: center; padding: 18px 4px 0; }
 .footer-actions { display: flex; align-items: center; }
 .footer-actions [hidden] { display: none; }
 .secondary-button, .primary-button { padding: 13px 18px; border-radius: 8px; font-size: .9rem; font-weight: 700; }
@@ -139,9 +139,12 @@ body.live-open { overflow: hidden; }
 .stage-progress-item small { margin-top: 5px; color: #61758e; font-size: .78rem; }
 .timer-note { margin-top: 36px; color: #8097b0; font-size: 1.05rem; }
 .controller-zone { margin-top: 42px; }
-.controller-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 13px; padding-top: 17px; border-top: 1px solid rgba(169, 194, 225, .1); color: #61758e; font-size: .72rem; }
+.controller-strip { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 10px 13px; padding-top: 17px; border-top: 1px solid rgba(169, 194, 225, .1); color: #61758e; font-size: .72rem; }
 .title-block > .controller-strip { padding-top: 0; border-top: 0; }
-.device-badge { display: inline-flex; align-items: center; gap: 7px; color: #91a1b8; font-size: .73rem; }
+.device-badge { display: inline-flex; min-width: 0; align-items: center; gap: 7px; color: #91a1b8; font-size: .73rem; white-space: nowrap; }
+.device-badge > span, #device-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-badge.error > span { overflow: visible; text-overflow: clip; overflow-wrap: anywhere; white-space: normal; }
+#device-detail.is-error { overflow: visible; overflow-wrap: anywhere; white-space: normal; }
 .device-badge i { background: #71859e; box-shadow: none; }
 .device-badge.connected { color: #8ed7a4; }
 .device-badge.connected i { background: #68d391; box-shadow: 0 0 10px #68d391; }
@@ -169,7 +172,7 @@ body.live-open { overflow: hidden; }
   .stage-fields { grid-template-columns: minmax(140px, 210px) 76px 94px 58px; }
   .stage-fields label:last-child { display: none; }
   .editor-card { padding: 18px; }
-  .overview-canvas { padding: 18px 16px; }
+  .overview-canvas { padding: 0; }
   .overview-layout { gap: 18px; }
   .stage-row { gap: 9px; padding: 9px 10px; }
   .stage-color { height: 34px; }
@@ -183,7 +186,7 @@ body.live-open { overflow: hidden; }
   .topbar { padding: 10px 0; }
   .wireframe-flow { padding: 12px 0; }
   .editor-card { padding: 16px 18px; }
-  .overview-canvas { padding: 16px 18px; }
+  .overview-canvas { padding: 0; }
   .overview-layout { gap: 16px; }
   .stage-list { gap: 6px; }
   .stage-row { padding: 8px 10px; }
@@ -196,20 +199,20 @@ body.live-open { overflow: hidden; }
   .page-shell { width: min(100% - 12px, 1160px); }
   .topbar { padding: 10px 0; }
   .title-block { align-items: flex-start; flex-direction: column; gap: 9px; }
-  .title-block > .controller-strip { width: 100%; align-items: flex-start; flex-direction: column; gap: 7px; }
+  .title-block > .controller-strip { width: 100%; flex-wrap: nowrap; }
   .wireframe-flow { padding: 12px 0; }
   .editor-card { padding: 14px 8px 16px; }
-  .wireframe-toolbar { align-items: flex-start; flex-direction: column; gap: 9px; }
-  .preset-control { width: 100%; }
-  .preset-picker { flex: 1; width: auto; }
-  .toolbar-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; overflow-x: visible; }
-  .overview-canvas { padding: 14px 8px; }
+  .wireframe-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+  .preset-control { display: contents; }
+  .preset-picker { grid-column: 1 / -1; grid-row: 1; width: 100%; min-width: 0; }
+  .preset-actions { grid-column: 1; grid-row: 2; width: auto; justify-content: flex-start; flex-wrap: nowrap; }
+  .wireframe-toolbar > .toolbar-actions { grid-column: 2; grid-row: 2; width: auto; justify-content: flex-end; flex-wrap: nowrap; overflow-x: visible; }
+  .overview-canvas { padding: 0; }
   .overview-layout { gap: 18px; }
   .overview-fields { grid-template-columns: 1fr; max-width: none; }
   .stage-overview-heading { margin-bottom: 10px; }
   .stage-row { grid-template-columns: 20px 6px minmax(0, 1fr) auto; gap: 7px; padding: 8px 5px; }
   .stage-fields { grid-template-columns: 1fr; }
-  .stage-fields label:nth-child(3), .stage-fields label:nth-child(5) { display: none; }
   .stage-fields input, .stage-fields select { margin-top: 4px; padding: 8px; }
   .stage-color { height: 30px; }
   .stage-actions { flex-direction: column; }
@@ -245,7 +248,7 @@ body.live-open { overflow: hidden; }
   .stage-progress-item small { margin-top: 3px; font-size: .64rem; }
   .timer-note { margin-top: 18px; font-size: .8rem; }
   .controller-zone { margin-top: 20px; }
-  .controller-strip { align-items: flex-start; flex-direction: column; }
+  .controller-strip { align-items: center; flex-wrap: nowrap; }
   .text-button.send-config { margin-left: 0; }
 }
 
@@ -261,7 +264,7 @@ body.live-open { overflow: hidden; }
   .preset-control { width: auto; flex: 1; }
   .preset-picker { width: min(300px, 38vw); }
   .toolbar-actions { width: auto; flex-wrap: nowrap; }
-  .overview-canvas { padding: 10px 12px; }
+  .overview-canvas { padding: 0; }
   .overview-layout { gap: 12px; }
   .overview-fields { grid-template-columns: 1.15fr .85fr; gap: 8px; }
   .stage-overview-heading { margin-bottom: 7px; }
@@ -272,8 +275,8 @@ body.live-open { overflow: hidden; }
   .editor-footer { padding-top: 10px; }
 }
 
-/* Let the editor scroll when short screens cannot show the full stage list. */
-@media (max-height: 600px) {
+/* Let the editor scroll when compact screens cannot show the full stage list. */
+@media (max-height: 600px), (max-width: 620px) {
   .overview-canvas { overflow-y: auto; }
   .overview-layout { flex: 0 0 auto; grid-template-rows: auto auto; }
   .stage-overview { min-height: 260px; }
