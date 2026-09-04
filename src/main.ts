@@ -47,6 +47,7 @@ let localTimerRunning = false;
 let localTimerStartedAt = 0;
 let localTimerElapsed = 0;
 let localTimerDuration = 0;
+let deviceCommandQueue: Promise<void> = Promise.resolve();
 
 function stageMarkup(stage: Stage, index: number): string {
   return `<article class="stage-row ${index === 0 ? 'is-expanded' : ''}" data-index="${index}" style="--stage-color:${stage.color}">
@@ -83,7 +84,13 @@ function showInvalid(): void { document.querySelector('.overview-canvas')?.class
 function updateEditorActions(): void { const save = document.querySelector<HTMLButtonElement>('#save-preset'); const revert = document.querySelector<HTMLButtonElement>('#reset-form'); if (save) save.disabled = saved; if (revert) revert.hidden = saved; }
 function savePreset(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } current.updatedAt = new Date().toISOString(); const existing = presets.findIndex((preset) => preset.id === current.id); if (existing >= 0) presets[existing] = structuredClone(current); else presets.unshift(structuredClone(current)); persist(); revertTarget = structuredClone(current); saved = true; render(); if (serial.status.state === 'connected') void sendConfiguration(); }
 async function sendConfiguration(): Promise<void> { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } try { await serial.sendConfiguration(current); } catch (error) { const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send the preset'; } }
-async function handleDeviceCommand(command: TimerCommand): Promise<void> { try { await serial.sendTimerCommand(command); } catch (error) { const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send timer command'; } }
+function handleDeviceCommand(command: TimerCommand): Promise<void> {
+  const task = deviceCommandQueue.then(async () => {
+    try { await serial.sendTimerCommand(command); } catch (error) { const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send timer command'; }
+  });
+  deviceCommandQueue = task;
+  return task;
+}
 
 function updateTimerUi(): void {
   const configuredDuration = Number.isFinite(current.duration) && current.duration > 0 ? current.duration : 0;
@@ -106,7 +113,18 @@ function configuredTimerDuration(): number { return Number.isFinite(current.dura
 function resetLocalTimer(): void { localTimerRunning = false; localTimerElapsed = 0; localTimerDuration = 0; if (timerInterval) window.clearInterval(timerInterval); timerInterval = undefined; updateTimerUi(); }
 function nextLocalStage(): void { const elapsed = localTimerRunning ? localTimerElapsed + (Date.now() - localTimerStartedAt) / 1000 : localTimerElapsed; const next = current.stages.find((stage) => stage.threshold > elapsed + 0.1); if (!next) return; localTimerElapsed = next.threshold; if (localTimerRunning) localTimerStartedAt = Date.now(); updateTimerUi(); if (serial.status.state === 'connected') void handleDeviceCommand('advance'); }
 function openLiveView(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } resetLocalTimer(); const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (!overlay) return; overlay.hidden = false; document.body.classList.add('live-open'); window.setTimeout(() => document.querySelector<HTMLButtonElement>('#local-play')?.focus(), 0); updateTimerUi(); }
-function closeLiveView(): void { const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (overlay) overlay.hidden = true; document.body.classList.remove('live-open'); }
+function stopLiveTimer(): void {
+  const wasRunning = localTimerRunning || runtime.state === 'running';
+  resetLocalTimer();
+  if (wasRunning && serial.status.state === 'connected') void handleDeviceCommand('reset');
+}
+function closeLiveView(): void {
+  const overlay = document.querySelector<HTMLElement>('#live-overlay');
+  if (!overlay || overlay.hidden) return;
+  stopLiveTimer();
+  overlay.hidden = true;
+  document.body.classList.remove('live-open');
+}
 
 function bindEvents(): void {
   document.querySelector('#preset-picker-toggle')?.addEventListener('click', () => { const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (!menu || !toggle) return; menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
