@@ -2,9 +2,9 @@
 
 TimeLight is a programmable visual timing system for speeches, presentations, debates, and other timed events.
 
-The website is the sole owner of timer state: it stores preset snapshots, derives elapsed time from timestamps, selects stages, and routes screen and physical controls through one reducer. Active runs survive refreshes and continue beyond the configured duration in the final stage until Pause or Reset. The site remains fully usable without hardware.
+The website owns timer state whenever it is connected: it stores preset snapshots, derives elapsed time from timestamps, selects stages, and routes screen and physical controls through one reducer. Active browser runs survive refreshes and continue beyond the configured duration in the final stage until Pause or Reset. The site remains fully usable without hardware.
 
-The optional Arduino Nano is a low-latency circuit controller. It renders commanded LED/buzzer effects, reports debounced button presses, and has no timer or preset state. Serial protocol v3 uses declarative output snapshots, controller-owned non-blocking transitions and breathing animation, revision deduplication, one-shot event deduplication, a three-second audible lease, automatic recovery, and current-state resynchronization after MCU reset.
+The optional Arduino Nano can also run one device-owned preset when no browser session is active. The paper-plane Send action explicitly stores the current editor values—including unsaved edits—in dual checksummed EEPROM slots. Save and Connect never overwrite device memory. Timer progress remains volatile, so reset and power-up are always idle/off. Protocol v3 capability detection keeps older browser-only v3 firmware usable.
 
 ## Local development
 
@@ -19,7 +19,7 @@ Check the production build locally with `npm run build` and `npm run preview`; o
 
 ## Arduino connection
 
-Use desktop Chrome or Microsoft Edge over the HTTPS production origin. The browser retries the v3 handshake after Nano reset, reopens an authorized port after transport loss, and provides a manual Reconnect action. Timer operation continues locally when hardware is unavailable. The default strip is 116 WS2812 LEDs on D6; the buzzer is D7, play/pause is D4, and next-stage is D5. Some Nano variants use a CH340 USB-to-serial chip and may need an operating-system driver.
+Use desktop Chrome or Microsoft Edge over the HTTPS production origin. A handshake gives the browser exclusive control and immediately cancels any standalone run. Manual disconnect releases the controller idle/off at once; unexpected loss does so after the three-second keepalive lease and then advertises readiness for recovery. Offline, Play/Pause starts or pauses the stored preset, short Next advances on release, and a three-second Next hold resets. During browser ownership those gestures are routed to the website instead. The default strip is 116 WS2812 LEDs on D6; the buzzer is D7, play/pause is D4, and next-stage is D5. Some Nano variants use a CH340 USB-to-serial chip and may need an operating-system driver.
 
 See [`docs/serial-protocol.md`](docs/serial-protocol.md) and [`arduino/README.md`](arduino/README.md) for the complete protocol and upload instructions.
 

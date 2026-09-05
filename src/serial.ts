@@ -5,11 +5,14 @@ export const OUTPUT_LEASE_MS = 3000;
 export type SerialConnectionState = 'unsupported' | 'disconnected' | 'connecting' | 'connected' | 'error';
 export type LedEffect = 'off' | 'solid' | 'blink';
 export type BuzzerMode = 'none' | 'repeat';
+export type ControllerBuzzerMode = 'none' | 'once' | 'repeat';
+export type ControllerStage = { threshold: number; color: string; blink: boolean; buzzer: ControllerBuzzerMode };
+export type ControllerPreset = { duration: number; stages: ControllerStage[] };
 export type OutputSnapshot = { revision: number; color: string; ledEffect: LedEffect; transitionMs: number; animationState: 'playing' | 'paused'; buzzerMode: BuzzerMode };
 export type DeviceMessage = { version?: number; type?: string; [key: string]: unknown };
-export type ReadyMessage = DeviceMessage & { type: 'ready'; firmware?: string; ledCount?: number; buttons?: string[]; requestId?: string };
+export type ReadyMessage = DeviceMessage & { type: 'ready'; firmware?: string; ledCount?: number; buttons?: string[]; capabilities?: string[]; requestId?: string };
 export type ButtonMessage = DeviceMessage & { type: 'button'; button?: string; sequence?: number };
-export type SerialStatus = { state: SerialConnectionState; message: string; firmware?: string; warning?: boolean; ledCount?: number };
+export type SerialStatus = { state: SerialConnectionState; message: string; firmware?: string; warning?: boolean; ledCount?: number; capabilities?: string[] };
 
 export interface SerialPortLike { readable: ReadableStream<Uint8Array> | null; writable: WritableStream<Uint8Array> | null; open(options: { baudRate: number }): Promise<void>; close(): Promise<void> }
 export interface SerialLike { requestPort(): Promise<SerialPortLike>; getPorts(): Promise<SerialPortLike[]> }
@@ -41,6 +44,7 @@ export class ArduinoSerial {
 
   constructor(private readonly api: SerialLike | undefined = serialApi()) {}
   get status(): SerialStatus { return this.currentStatus; }
+  get supportsStandalonePreset(): boolean { return this.currentStatus.state === 'connected' && this.currentStatus.capabilities?.includes('standalone-preset') === true; }
   get browserSessionId(): string { return this.sessionId; }
   onStatus(listener: (status: SerialStatus) => void): () => void { this.listeners.add(listener); listener(this.currentStatus); return () => this.listeners.delete(listener); }
   onMessage(listener: (message: DeviceMessage) => void): () => void { this.messageListeners.add(listener); return () => this.messageListeners.delete(listener); }
@@ -52,11 +56,14 @@ export class ArduinoSerial {
     this.setStatus({ state: 'connecting', message: 'Connecting to the TimeLight controller' });
     try {
       this.port = port ?? await this.api.requestPort(); await this.port.open({ baudRate: DEFAULT_BAUD_RATE }); this.startReading(); await this.waitForReady();
-      this.setStatus({ state: 'connected', message: 'Controller ready', firmware: this.currentStatus.firmware, ledCount: this.currentStatus.ledCount }); this.startKeepalive();
+      this.setStatus({ state: 'connected', message: 'Controller ready', firmware: this.currentStatus.firmware, ledCount: this.currentStatus.ledCount, capabilities: this.currentStatus.capabilities }); this.startKeepalive();
     } catch (error) { await this.closePort(); const message = error instanceof Error ? error.message : 'Could not connect to the controller'; this.setStatus({ state: 'error', message }); throw error; }
   }
   async reconnect(): Promise<boolean> { if (!this.api) return false; const ports = await this.api.getPorts(); if (!ports.length) return false; await this.closePort(); await this.connect(ports[0]); return true; }
-  async disconnect(): Promise<void> { await this.closePort(); this.setStatus({ state: 'disconnected', message: 'Controller disconnected' }); }
+  async disconnect(): Promise<void> {
+    if (this.currentStatus.state === 'connected') await this.releaseControl().catch(() => undefined);
+    await this.closePort(); this.setStatus({ state: 'disconnected', message: 'Controller disconnected' });
+  }
 
   async setOutputs(snapshot: OutputSnapshot): Promise<void> {
     this.outputPending = snapshot;
@@ -71,6 +78,11 @@ export class ArduinoSerial {
   }
   async buzzOnce(eventId: string): Promise<void> { await this.sendRequest({ type: 'buzz_once', sessionId: this.sessionId, eventId }); }
   async ping(): Promise<void> { await this.sendRequest({ type: 'ping' }); }
+  async storePreset(preset: ControllerPreset): Promise<void> {
+    if (!this.supportsStandalonePreset) throw new Error('Controller firmware does not support standalone presets.');
+    await this.sendRequest({ type: 'store_preset', sessionId: this.sessionId, duration: preset.duration, stages: preset.stages.map(({ threshold, color, blink, buzzer }) => [threshold, color, blink, buzzer]) });
+  }
+  async releaseControl(): Promise<void> { await this.sendRequest({ type: 'release_control', sessionId: this.sessionId }); }
 
   private sendRequest(payload: DeviceMessage, attempts = 3): Promise<DeviceMessage> {
     const task = this.requestQueue.then(() => this.performRequest(payload, attempts));
@@ -111,23 +123,36 @@ export class ArduinoSerial {
     finally { this.reader.releaseLock(); this.reader = null; if (this.currentStatus.state !== 'disconnected') this.setStatus({ state: 'disconnected', message: 'Controller connection lost' }); }
   }
   private handleLine(line: string): void {
-    let message: DeviceMessage;
-    try { message = JSON.parse(line) as DeviceMessage; } catch { this.setStatus({ ...this.currentStatus, message: 'Controller warning: malformed JSON ignored', warning: true }); return; }
+    const message = this.parseMessage(line);
+    if (!message) { this.setStatus({ ...this.currentStatus, message: 'Controller warning: malformed JSON ignored', warning: true }); return; }
     if (message.version !== PROTOCOL_VERSION) { this.setStatus({ ...this.currentStatus, message: `Incompatible controller protocol (expected v${PROTOCOL_VERSION})`, warning: true }); return; }
     if (message.type === 'ack' && typeof message.requestId === 'string') { const waiter = this.pending.get(message.requestId); if (waiter) { this.pending.delete(message.requestId); waiter.resolve(message); if (this.currentStatus.state === 'connected' && this.currentStatus.warning) this.setStatus({ ...this.currentStatus, message: 'Controller ready', warning: false }); } }
     if (message.type === 'error') { const waiter = typeof message.requestId === 'string' ? this.pending.get(message.requestId) : undefined; if (waiter && typeof message.requestId === 'string') { this.pending.delete(message.requestId); waiter.reject(new Error(typeof message.message === 'string' ? message.message : 'Controller rejected the command.')); } else this.setStatus({ ...this.currentStatus, message: typeof message.message === 'string' ? `Controller warning: ${message.message}` : 'Controller warning', warning: true }); }
     if (message.type === 'ready') this.handleReady(message as ReadyMessage);
     this.messageListeners.forEach((listener) => listener(message));
   }
+  private parseMessage(line: string): DeviceMessage | null {
+    // A controller reset can interrupt one response and append its boot-ready message
+    // to that unfinished line. Work backwards so the newest complete frame survives.
+    for (let start = line.lastIndexOf('{'); start >= 0;) {
+      try {
+        const value: unknown = JSON.parse(line.slice(start));
+        if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as DeviceMessage;
+      } catch { /* Try an earlier object boundary. */ }
+      if (start === 0) break;
+      start = line.lastIndexOf('{', start - 1);
+    }
+    return null;
+  }
   private handleReady(message: ReadyMessage): void {
-    const firmware = typeof message.firmware === 'string' ? message.firmware : undefined; const ledCount = typeof message.ledCount === 'number' ? message.ledCount : undefined;
-    this.currentStatus = { ...this.currentStatus, firmware, ledCount, message: 'Controller ready', warning: false };
+    const firmware = typeof message.firmware === 'string' ? message.firmware : undefined; const ledCount = typeof message.ledCount === 'number' ? message.ledCount : undefined; const capabilities = Array.isArray(message.capabilities) ? message.capabilities.filter((item): item is string => typeof item === 'string') : [];
+    this.currentStatus = { ...this.currentStatus, firmware, ledCount, capabilities, message: 'Controller ready', warning: false };
     const requestMatchesHandshake = typeof message.requestId === 'string';
     if (requestMatchesHandshake) {
       this.readyResolver?.(); this.readyResolver = null; this.readyRejecter = null;
-      this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message));
+      this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount, capabilities }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message));
     } else if (this.currentStatus.state === 'connected') {
-      this.setStatus({ state: 'connecting', message: 'Controller restarted; reconnecting' }); void this.waitForReady().then(() => { this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message)); }).catch(() => undefined);
+      this.setStatus({ state: 'connecting', message: 'Controller restarted; reconnecting', firmware, ledCount, capabilities }); void this.waitForReady().catch(() => undefined);
     }
   }
   private waitForReady(): Promise<void> { return new Promise((resolve, reject) => { this.readyResolver = resolve; this.readyRejecter = reject; const deadline = Date.now() + 8000; const sendHello = () => { if (!this.readyResolver) return; if (Date.now() >= deadline) { this.readyResolver = null; this.readyRejecter = null; reject(new Error('Timed out waiting for the controller ready message.')); return; } void this.write({ version: PROTOCOL_VERSION, requestId: requestId(), type: 'hello', sessionId: this.sessionId }).catch(() => undefined); this.readyTimer = window.setTimeout(sendHello, 250); }; sendHello(); }); }

@@ -7,7 +7,7 @@ globalThis.window = globalThis;
 const source = ts.transpileModule(readFileSync(new URL('../src/serial.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const serialModule = await import(`data:text/javascript,${encodeURIComponent(source)}`);
 
-function fakePort({ ignoreFirstHello = false, retryOutput = false, ignoreOutput = false, retryBuzz = false, malformedOutputAck = false, holdOutputAck = false, bootReady = false } = {}) {
+function fakePort({ ignoreFirstHello = false, retryOutput = false, ignoreOutput = false, retryBuzz = false, retryStore = false, malformedOutputAck = false, holdOutputAck = false, bootReady = false, standalone = false } = {}) {
   let controller;
   let helloCount = 0;
   let outputCount = 0;
@@ -17,12 +17,14 @@ function fakePort({ ignoreFirstHello = false, retryOutput = false, ignoreOutput 
   const readable = new ReadableStream({ start(value) { controller = value; if (bootReady) queueMicrotask(() => controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ready', firmware: 'boot', ledCount: 116 }) + '\n'))); } });
   const writable = new WritableStream({ write(chunk) {
     const message = JSON.parse(new TextDecoder().decode(chunk)); writes.push(message);
-    if (message.type === 'hello') { helloCount++; if (ignoreFirstHello && helloCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ready', requestId: message.requestId, firmware: 'test', ledCount: 116 }) + '\n')); }
+    if (message.type === 'hello') { helloCount++; if (ignoreFirstHello && helloCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ready', requestId: message.requestId, firmware: 'test', ledCount: 116, ...(standalone ? { capabilities: ['standalone-preset'] } : {}) }) + '\n')); }
     if (message.type === 'set_outputs') { outputCount++; if (ignoreOutput || retryOutput && outputCount === 1) return; if (holdOutputAck && outputCount === 1) { heldOutput = message; return; } if (malformedOutputAck && outputCount === 1) { controller.enqueue(new TextEncoder().encode('{bad-json\n')); return; } controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: message.revision }) + '\n')); }
     if (message.type === 'buzz_once') { buzzCount++; if (retryBuzz && buzzCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: outputCount }) + '\n')); }
     if (message.type === 'keepalive') controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: 0 }) + '\n'));
+    if (message.type === 'release_control') controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId }) + '\n'));
+    if (message.type === 'store_preset') { if (retryStore && writes.filter((item) => item.type === 'store_preset').length === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId }) + '\n')); }
   } });
-  return { port: { readable, writable, async open() {}, async close() { controller.close(); } }, writes, feed(line) { controller.enqueue(new TextEncoder().encode(line + '\n')); }, acknowledgeOutput() { if (!heldOutput) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: heldOutput.requestId, appliedRevision: heldOutput.revision }) + '\n')); heldOutput = undefined; }, get helloCount() { return helloCount; } };
+  return { port: { readable, writable, async open() {}, async close() { controller.close(); } }, writes, feed(line) { controller.enqueue(new TextEncoder().encode(line + '\n')); }, feedRaw(value) { controller.enqueue(new TextEncoder().encode(value)); }, acknowledgeOutput() { if (!heldOutput) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: heldOutput.requestId, appliedRevision: heldOutput.revision }) + '\n')); heldOutput = undefined; }, get helloCount() { return helloCount; } };
 }
 
 test('handshake retries a missed boot message and malformed input remains recoverable', async () => {
@@ -48,6 +50,21 @@ test('boot ready does not authorize output before the hello session is establish
   await serial.connect();
   await serial.setOutputs({ revision: 1, color: '#0000ff', ledEffect: 'solid', transitionMs: 0, animationState: 'playing', buzzerMode: 'none' });
   assert.equal(serial.status.state, 'connected');
+  await serial.disconnect();
+});
+
+test('a ready frame survives a controller reset that truncates the preceding response', async () => {
+  const fake = fakePort();
+  const serial = new serialModule.ArduinoSerial({ async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } });
+  let readyCount = 0;
+  serial.onReady(() => { readyCount++; });
+  await serial.connect();
+  fake.feedRaw('{"version":3,"type":"ack","requestId":"interrupted');
+  fake.feed(JSON.stringify({ version: 3, type: 'ready', firmware: 'test-reset', ledCount: 116 }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(serial.status.state, 'connected');
+  assert.equal(serial.status.warning, undefined);
+  assert.ok(readyCount >= 2);
   await serial.disconnect();
 });
 
@@ -122,6 +139,38 @@ test('an unrecoverable output timeout marks the link for reconnection', async ()
   await serial.connect();
   await assert.rejects(serial.setOutputs({ revision: 5, color: '#ff0000', ledEffect: 'blink', transitionMs: 1000, animationState: 'playing', buzzerMode: 'repeat' }), /timed out/);
   assert.equal(serial.status.state, 'error');
+  await serial.disconnect();
+});
+
+test('standalone capability gates exact compact preset serialization and retries', async () => {
+  const fake = fakePort({ standalone: true, retryStore: true });
+  const serial = new serialModule.ArduinoSerial({ async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } });
+  await serial.connect();
+  assert.equal(serial.supportsStandalonePreset, true);
+  const preset = { duration: 86400, stages: [
+    { threshold: 0, color: '#0000ff', blink: false, buzzer: 'none' },
+    { threshold: 10000, color: '#ffff00', blink: true, buzzer: 'once' },
+    { threshold: 20000, color: '#ff0000', blink: false, buzzer: 'repeat' },
+    { threshold: 30000, color: '#ffffff', blink: true, buzzer: 'none' },
+    { threshold: 40000, color: '#00ffff', blink: false, buzzer: 'repeat' },
+  ] };
+  await serial.storePreset(preset);
+  const stores = fake.writes.filter((message) => message.type === 'store_preset');
+  assert.equal(stores.length, 2);
+  assert.deepEqual(stores[0], { version: 3, requestId: stores[0].requestId, type: 'store_preset', sessionId: serial.browserSessionId, duration: preset.duration, stages: preset.stages.map(({ threshold, color, blink, buzzer }) => [threshold, color, blink, buzzer]) });
+  assert.equal(JSON.stringify(stores[0]).includes(' '), false);
+  assert.ok(JSON.stringify(stores[0]).length < 336);
+  await serial.disconnect();
+  assert.equal(fake.writes.at(-1).type, 'release_control');
+});
+
+test('older protocol-v3 firmware connects but rejects standalone storage locally', async () => {
+  const fake = fakePort();
+  const serial = new serialModule.ArduinoSerial({ async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } });
+  await serial.connect();
+  assert.equal(serial.supportsStandalonePreset, false);
+  await assert.rejects(serial.storePreset({ duration: 3, stages: [] }), /does not support/);
+  assert.equal(fake.writes.some((message) => message.type === 'store_preset'), false);
   await serial.disconnect();
 });
 

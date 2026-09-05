@@ -1,61 +1,61 @@
 # TimeLight serial protocol v3
 
-The website is authoritative for presets, elapsed time, stages, timer state, and control decisions. The Arduino is a low-latency output renderer and button reporter. It never receives a preset, threshold, elapsed time, or start/pause/advance command.
+Protocol v3 supports two exclusive owners. A browser session is authoritative whenever its lease is active; otherwise firmware 0.4.0 can run one EEPROM-backed preset locally. Older v3 firmware remains compatible for browser-owned timing but does not advertise standalone storage.
 
-Messages are newline-delimited UTF-8 JSON over 115200 baud, 8 data bits, no parity, and one stop bit. The current wiring is WS2812 data on D6, buzzer on D7, play/pause on D4, and next-stage on D5. The firmware default is `LED_COUNT=116`, a documented compile-time setting.
+Messages are compact, newline-delimited UTF-8 JSON at 115200 baud (8-N-1). Commands carry a `requestId`; the browser retries an unacknowledged request twice after 500 ms, using the same command content. The controller acknowledges with `{"version":3,"type":"ack","requestId":"...","appliedRevision":12}` or returns an `error` with the same request ID.
 
-## Handshake and health
+## Handshake and ownership
 
-The browser sends `hello` repeatedly every 250 ms for up to eight seconds after opening a port. This handles Nano auto-reset without requiring the browser to catch the one boot message. A hello establishes the browser session; the Arduino responds to every hello with `ready`.
+The browser sends `hello` every 250 ms for up to eight seconds:
 
 ```json
 {"version":3,"requestId":"...","type":"hello","sessionId":"browser-session-id"}
 ```
 
-```json
-{"version":3,"type":"ready","requestId":"...","device":"timelight-arduino","firmware":"0.3.0","ledCount":116,"buttons":["play_pause","next_stage"]}
-```
-
-The Arduino also emits `ready` after boot. A ready message received on an already-open port causes the browser to repeat the handshake and resend its current output snapshot. It does not replay old timer transitions or chimes.
-
-`ping` produces `pong`. `keepalive` is sent once per second while connected and renews a repeating-buzzer lease. Commands that have a `requestId` are acknowledged as follows:
+A valid hello immediately cancels standalone timing, turns outputs off, establishes a three-second browser lease, and returns:
 
 ```json
-{"version":3,"type":"ack","requestId":"...","appliedRevision":12}
+{"version":3,"type":"ready","requestId":"...","device":"timelight-arduino","firmware":"0.4.0","ledCount":116,"buttons":["play_pause","next_stage","reset"],"capabilities":["standalone-preset"]}
 ```
 
-The browser waits 500 ms and retries twice. The Arduino treats malformed or oversized lines as recoverable errors and continues its output and button loops. v2 and v1 commands receive a clear unsupported-protocol error; v2 clients/controllers are explicitly incompatible with v3.
+The browser sends session-bound `keepalive` once per second. Every valid session command renews the lease. `release_control` immediately releases a manual disconnect:
 
-## Website to Arduino
+```json
+{"version":3,"requestId":"...","type":"release_control","sessionId":"browser-session-id"}
+```
 
-`set_outputs` is a complete declarative snapshot. Newer revisions supersede older revisions; duplicate or stale revisions are acknowledged without being applied.
+Release or lease expiry clears volatile timer state and turns LEDs, animation, and sound off. On unexpected expiry the controller emits an unsolicited `ready`, allowing an open page to handshake again. Boot also emits unsolicited `ready`; a connected browser responds by re-handshaking and sending its current output snapshot. `ping` returns `pong` and an acknowledgement.
+
+## Browser output commands
+
+`set_outputs` remains the complete declarative browser-owned output snapshot. Revisions deduplicate retries. Effects are `off`, `solid`, or `blink`; animation is `playing` or `paused`; buzzer mode is `none` or `repeat`. A newly commanded color may transition for up to 5000 ms. Blink and transitions run on the controller, and paused animation freezes the rendered frame.
 
 ```json
 {"version":3,"requestId":"...","type":"set_outputs","sessionId":"browser-session-id","revision":12,"color":"#ff0000","ledEffect":"blink","transitionMs":1000,"animationState":"playing","buzzerMode":"repeat","leaseMs":3000}
 ```
 
-`ledEffect` is `off`, `solid`, or `blink`. `animationState` is `playing` or `paused`; it controls whether transition and breathing progress advances. `transitionMs` is the duration for adopting a newly commanded target: the website uses 300 ms at start, 1000 ms at stage entry, and 0 ms for state-only synchronization or reconnect. A blinking target reaches full color before its 700 ms fade-out and 700 ms fade-in breathing cycle begins. `buzzerMode` is `none` or `repeat`. `leaseMs` is at most 3000 and is renewed by keepalive. If the lease expires, repeating audio is silenced while the last LED state remains.
-
-The Arduino freezes the exact rendered frame when `animationState` is `paused`. A resume snapshot with `transitionMs: 0` retains the transition/blink progress. A new target starts a transition from the currently displayed frame. `ledEffect: "off"` immediately clears all animation state. Duplicate or stale revisions are acknowledged without restarting animation, including retried commands.
-
-Stage-entry one-shot alerts use a session-scoped event ID. The Arduino deduplicates recent event IDs, making retries safe:
+One-shot chimes remain retry-safe through a session-scoped event ID:
 
 ```json
 {"version":3,"requestId":"...","type":"buzz_once","sessionId":"browser-session-id","eventId":"run-id:stage-index"}
 ```
 
-## Arduino to website
+## Standalone preset storage
 
-Debounced buttons are reported only after a browser session has been established:
+Only controllers whose `ready.capabilities` contains `standalone-preset` accept `store_preset`. It is acknowledged, session-bound, and contains only timing/output data. Stage count is 3–5, thresholds are strictly increasing and below duration, colors are six-digit CSS hex values, and buzzer is `none`, `once`, or `repeat`.
 
 ```json
-{"version":3,"type":"button","button":"play_pause","sequence":42}
+{"version":3,"requestId":"...","type":"store_preset","sessionId":"browser-session-id","duration":180,"stages":[[0,"#0000ff",false,"none"],[60,"#ffff00",false,"once"],[120,"#ff0000",true,"repeat"]]}
 ```
 
-`button` is `play_pause` or `next_stage`. The sequence is monotonic for the current MCU boot and the website deduplicates already-seen sequences before routing the event through the same reducer action as an on-screen control.
+Each compact stage tuple is `[threshold, color, blink, buzzer]`. This bounded representation keeps the complete five-stage command within the Nano's receive buffer without taking memory needed by the LED strip.
 
-## Loss and recovery
+Only this explicit command writes EEPROM. Save and Connect do not. Firmware stores fixed-width data in alternating versioned slots with monotonic sequence numbers and checksums, committing the magic marker last. It loads the newest valid slot at boot and uses the compiled four-stage default if both slots are empty or corrupt. Elapsed time, current stage, and pause state are never stored. Storing while connected resets any dormant standalone run without changing current browser-owned outputs.
 
-The website timer continues while USB is unavailable. A lost link is shown persistently in the live timer. The browser reopens an already-authorized port with bounded backoff from 250 ms to five seconds, and the Reconnect control can close/reopen and re-handshake without a page reload. After each handshake it sends exactly the current output snapshot. Repeating audio is guaranteed to stop within the three-second lease; LEDs retain their last commanded state.
+## Buttons and standalone behavior
 
-On pause, the browser sends the current stage with repeating audio disabled, so the LEDs hold their appearance. Resume restores that stage's behavior. Reset sends `off` and clears the manual stage override.
+During a browser lease, controls only produce sequenced events: `play_pause`, `next_stage`, or `reset`. Reset is emitted when Next is held for three seconds; a short Next is emitted on release, so a long hold never advances first. The website routes all three through its timer reducer.
+
+Without a browser owner, Play/Pause starts at stage 1, pauses while preserving elapsed time and the exact light frame, and resumes. Thresholds automatically select colors, blinking, one-shot chimes, and repeating alerts; the final stage continues indefinitely. Short Next while running or paused anchors elapsed time at the next stage threshold. It renders that stage immediately, stays paused when applicable, and does nothing while idle or final. Holding Next for three seconds resets and turns every output off immediately.
+
+Runtime state always boots idle/off. Connecting mid-run cancels standalone operation. After manual release or a three-second unexpected-loss timeout, the device is idle/off and the stored preset can be started locally again.
