@@ -23,6 +23,7 @@ export class ArduinoSerial {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private writeQueue: Promise<void> = Promise.resolve();
+  private requestQueue: Promise<void> = Promise.resolve();
   private readLoopTask: Promise<void> | null = null;
   private lineBuffer = '';
   private readyResolver: (() => void) | null = null;
@@ -59,15 +60,24 @@ export class ArduinoSerial {
 
   async setOutputs(snapshot: OutputSnapshot): Promise<void> {
     this.outputPending = snapshot;
-    if (!this.outputTask) {
-      this.outputTask = (async () => { try { while (this.outputPending) { const next = this.outputPending; this.outputPending = null; await this.sendRequest({ type: 'set_outputs', sessionId: this.sessionId, revision: next.revision, color: next.color, ledEffect: next.ledEffect, transitionMs: next.transitionMs, animationState: next.animationState, buzzerMode: next.buzzerMode, leaseMs: next.buzzerMode === 'repeat' ? OUTPUT_LEASE_MS : 0 }); } } finally { this.outputTask = null; } })();
+    while (this.outputPending) {
+      if (!this.outputTask) {
+        const task = (async () => { try { while (this.outputPending) { const next = this.outputPending; this.outputPending = null; await this.sendRequest({ type: 'set_outputs', sessionId: this.sessionId, revision: next.revision, color: next.color, ledEffect: next.ledEffect, transitionMs: next.transitionMs, animationState: next.animationState, buzzerMode: next.buzzerMode, leaseMs: next.buzzerMode === 'repeat' ? OUTPUT_LEASE_MS : 0 }); } } catch (error) { if (this.currentStatus.state === 'connected') this.setStatus({ state: 'error', message: 'Controller stopped acknowledging output; reconnecting' }); throw error; } })();
+        const tracked = task.finally(() => { if (this.outputTask === tracked) this.outputTask = null; });
+        this.outputTask = tracked;
+      }
+      await this.outputTask;
     }
-    return this.outputTask;
   }
   async buzzOnce(eventId: string): Promise<void> { await this.sendRequest({ type: 'buzz_once', sessionId: this.sessionId, eventId }); }
   async ping(): Promise<void> { await this.sendRequest({ type: 'ping' }); }
 
-  private async sendRequest(payload: DeviceMessage, attempts = 3): Promise<DeviceMessage> {
+  private sendRequest(payload: DeviceMessage, attempts = 3): Promise<DeviceMessage> {
+    const task = this.requestQueue.then(() => this.performRequest(payload, attempts));
+    this.requestQueue = task.then(() => undefined, () => undefined);
+    return task;
+  }
+  private async performRequest(payload: DeviceMessage, attempts: number): Promise<DeviceMessage> {
     if (!this.port?.writable || (this.currentStatus.state !== 'connected' && payload.type !== 'hello')) throw new Error('Connect the Arduino controller before sending commands.');
     const id = requestId();
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -104,7 +114,7 @@ export class ArduinoSerial {
     let message: DeviceMessage;
     try { message = JSON.parse(line) as DeviceMessage; } catch { this.setStatus({ ...this.currentStatus, message: 'Controller warning: malformed JSON ignored', warning: true }); return; }
     if (message.version !== PROTOCOL_VERSION) { this.setStatus({ ...this.currentStatus, message: `Incompatible controller protocol (expected v${PROTOCOL_VERSION})`, warning: true }); return; }
-    if (message.type === 'ack' && typeof message.requestId === 'string') { const waiter = this.pending.get(message.requestId); if (waiter) { this.pending.delete(message.requestId); waiter.resolve(message); } }
+    if (message.type === 'ack' && typeof message.requestId === 'string') { const waiter = this.pending.get(message.requestId); if (waiter) { this.pending.delete(message.requestId); waiter.resolve(message); if (this.currentStatus.state === 'connected' && this.currentStatus.warning) this.setStatus({ ...this.currentStatus, message: 'Controller ready', warning: false }); } }
     if (message.type === 'error') { const waiter = typeof message.requestId === 'string' ? this.pending.get(message.requestId) : undefined; if (waiter && typeof message.requestId === 'string') { this.pending.delete(message.requestId); waiter.reject(new Error(typeof message.message === 'string' ? message.message : 'Controller rejected the command.')); } else this.setStatus({ ...this.currentStatus, message: typeof message.message === 'string' ? `Controller warning: ${message.message}` : 'Controller warning', warning: true }); }
     if (message.type === 'ready') this.handleReady(message as ReadyMessage);
     this.messageListeners.forEach((listener) => listener(message));

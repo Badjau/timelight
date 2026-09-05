@@ -7,19 +7,22 @@ globalThis.window = globalThis;
 const source = ts.transpileModule(readFileSync(new URL('../src/serial.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const serialModule = await import(`data:text/javascript,${encodeURIComponent(source)}`);
 
-function fakePort({ ignoreFirstHello = false, retryOutput = false, bootReady = false } = {}) {
+function fakePort({ ignoreFirstHello = false, retryOutput = false, ignoreOutput = false, retryBuzz = false, malformedOutputAck = false, holdOutputAck = false, bootReady = false } = {}) {
   let controller;
   let helloCount = 0;
   let outputCount = 0;
+  let buzzCount = 0;
+  let heldOutput;
   const writes = [];
   const readable = new ReadableStream({ start(value) { controller = value; if (bootReady) queueMicrotask(() => controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ready', firmware: 'boot', ledCount: 116 }) + '\n'))); } });
   const writable = new WritableStream({ write(chunk) {
     const message = JSON.parse(new TextDecoder().decode(chunk)); writes.push(message);
     if (message.type === 'hello') { helloCount++; if (ignoreFirstHello && helloCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ready', requestId: message.requestId, firmware: 'test', ledCount: 116 }) + '\n')); }
-    if (message.type === 'set_outputs') { outputCount++; if (retryOutput && outputCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: message.revision }) + '\n')); }
+    if (message.type === 'set_outputs') { outputCount++; if (ignoreOutput || retryOutput && outputCount === 1) return; if (holdOutputAck && outputCount === 1) { heldOutput = message; return; } if (malformedOutputAck && outputCount === 1) { controller.enqueue(new TextEncoder().encode('{bad-json\n')); return; } controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: message.revision }) + '\n')); }
+    if (message.type === 'buzz_once') { buzzCount++; if (retryBuzz && buzzCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: outputCount }) + '\n')); }
     if (message.type === 'keepalive') controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: 0 }) + '\n'));
   } });
-  return { port: { readable, writable, async open() {}, async close() { controller.close(); } }, writes, feed(line) { controller.enqueue(new TextEncoder().encode(line + '\n')); }, get helloCount() { return helloCount; } };
+  return { port: { readable, writable, async open() {}, async close() { controller.close(); } }, writes, feed(line) { controller.enqueue(new TextEncoder().encode(line + '\n')); }, acknowledgeOutput() { if (!heldOutput) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: heldOutput.requestId, appliedRevision: heldOutput.revision }) + '\n')); heldOutput = undefined; }, get helloCount() { return helloCount; } };
 }
 
 test('handshake retries a missed boot message and malformed input remains recoverable', async () => {
@@ -58,6 +61,67 @@ test('acknowledgement timeout retries and output snapshots coalesce', async () =
   await Promise.all([first, second]);
   const revisions = fake.writes.filter((message) => message.type === 'set_outputs').map((message) => message.revision);
   assert.deepEqual(revisions, [1, 1, 3]);
+  await serial.disconnect();
+});
+
+test('a one-shot chime can be sequenced after the stage output snapshot', async () => {
+  const fake = fakePort();
+  const api = { async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } };
+  const serial = new serialModule.ArduinoSerial(api);
+  await serial.connect();
+  await serial.setOutputs({ revision: 2, color: '#ffff00', ledEffect: 'solid', transitionMs: 1000, animationState: 'playing', buzzerMode: 'none' });
+  await serial.buzzOnce('run:1');
+  const commands = fake.writes.filter((message) => message.type === 'set_outputs' || message.type === 'buzz_once');
+  assert.deepEqual(commands.map((message) => message.type), ['set_outputs', 'buzz_once']);
+  await serial.disconnect();
+});
+
+test('a missed one-shot chime retries safely with the same event id', async () => {
+  const fake = fakePort({ retryBuzz: true });
+  const api = { async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } };
+  const serial = new serialModule.ArduinoSerial(api);
+  await serial.connect();
+  await serial.buzzOnce('run:1');
+  const buzzes = fake.writes.filter((message) => message.type === 'buzz_once');
+  assert.equal(buzzes.length, 2);
+  assert.equal(buzzes[0].eventId, buzzes[1].eventId);
+  await serial.disconnect();
+});
+
+test('a malformed output acknowledgement is retried and the warning clears after recovery', async () => {
+  const fake = fakePort({ malformedOutputAck: true });
+  const api = { async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } };
+  const serial = new serialModule.ArduinoSerial(api);
+  await serial.connect();
+  await serial.setOutputs({ revision: 4, color: '#ff0000', ledEffect: 'blink', transitionMs: 1000, animationState: 'playing', buzzerMode: 'repeat' });
+  assert.equal(fake.writes.filter((message) => message.type === 'set_outputs').length, 2);
+  assert.equal(serial.status.state, 'connected');
+  assert.equal(serial.status.warning, false);
+  await serial.disconnect();
+});
+
+test('a repeat-alert output completes before the next request is written', async () => {
+  const fake = fakePort({ holdOutputAck: true });
+  const api = { async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } };
+  const serial = new serialModule.ArduinoSerial(api);
+  await serial.connect();
+  const output = serial.setOutputs({ revision: 5, color: '#ff0000', ledEffect: 'blink', transitionMs: 1000, animationState: 'playing', buzzerMode: 'repeat' });
+  const buzz = serial.buzzOnce('run:next');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(fake.writes.filter((message) => message.type === 'set_outputs' || message.type === 'buzz_once').map((message) => message.type), ['set_outputs']);
+  fake.acknowledgeOutput();
+  await Promise.all([output, buzz]);
+  assert.deepEqual(fake.writes.filter((message) => message.type === 'set_outputs' || message.type === 'buzz_once').map((message) => message.type), ['set_outputs', 'buzz_once']);
+  await serial.disconnect();
+});
+
+test('an unrecoverable output timeout marks the link for reconnection', async () => {
+  const fake = fakePort({ ignoreOutput: true });
+  const api = { async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } };
+  const serial = new serialModule.ArduinoSerial(api);
+  await serial.connect();
+  await assert.rejects(serial.setOutputs({ revision: 5, color: '#ff0000', ledEffect: 'blink', transitionMs: 1000, animationState: 'playing', buzzerMode: 'repeat' }), /timed out/);
+  assert.equal(serial.status.state, 'error');
   await serial.disconnect();
 });
 

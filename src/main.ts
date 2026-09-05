@@ -66,14 +66,15 @@ function updateEditorActions(): void { const save = document.querySelector<HTMLB
 function configuredSnapshot(): PresetSnapshot { syncCurrentFromForm(); return { name: current.name, speaker: current.speaker, duration: current.duration, stages: structuredClone(current.stages) }; }
 function dispatch(action: TimerAction): void {
   const before = activeRun; const result = reduceTimer(activeRun, action, clock()); activeRun = result.run; persistRun();
-  if (result.run && result.chime) void serial.buzzOnce(`${result.run.runId}:${effectiveStage(result.run, clock())}`).catch(() => undefined);
   const transitionMs = action.type === 'start' ? 300 : result.stageChanged ? 1000 : action.type === 'reset' ? 0 : 0;
-  applyOutputs(action.type === 'start' || result.stageChanged || action.type === 'reset', transitionMs);
+  const outputTask = applyOutputs(action.type === 'start' || result.stageChanged || action.type === 'reset', transitionMs);
+  if (result.run && result.chime) { const eventId = `${result.run.runId}:${effectiveStage(result.run, clock())}`; void outputTask.then(() => serial.buzzOnce(eventId)).catch(() => undefined); }
+  else void outputTask.catch(() => undefined);
   updateTimerUi(); syncTimerLoop(); void syncWakeLock();
   if (action.type === 'start' && !before) { const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (overlay) overlay.hidden = false; document.body.classList.add('live-open'); }
 }
 function outputChanged(a: ReturnType<typeof deriveOutputs>, b: ReturnType<typeof deriveOutputs>): boolean { return a.color !== b.color || a.ledEffect !== b.ledEffect || a.animationState !== b.animationState || a.buzzerMode !== b.buzzerMode; }
-function applyOutputs(force: boolean, transitionMs = 0): void { const next = deriveOutputs(activeRun, clock()); if (!force && !outputChanged(next, lastOutputs)) return; outputRevision++; lastOutputs = next; void serial.setOutputs({ ...next, transitionMs, revision: outputRevision }).catch(() => undefined); }
+function applyOutputs(force: boolean, transitionMs = 0): Promise<void> { const next = deriveOutputs(activeRun, clock()); if (!force && !outputChanged(next, lastOutputs)) return Promise.resolve(); outputRevision++; lastOutputs = next; return serial.setOutputs({ ...next, transitionMs, revision: outputRevision }); }
 function savePreset(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } current.updatedAt = new Date().toISOString(); const existing = presets.findIndex((preset) => preset.id === current.id); if (existing >= 0) presets[existing] = structuredClone(current); else presets.unshift(structuredClone(current)); persistPresets(); revertTarget = structuredClone(current); saved = true; render(); }
 function updateTimerUi(): void {
   const run = activeRun; if (!run) return; const elapsed = elapsedSeconds(run, clock()); const duration = Math.max(1, run.preset.duration); const percent = Math.min(100, Math.max(0, elapsed / duration * 100));
@@ -119,7 +120,7 @@ function updateDeviceUi(status: SerialStatus): void { const badge = document.que
 function scheduleReconnect(): void { if (reconnectTimer || manualDisconnect || serial.status.state === 'connected' || serial.status.state === 'connecting') return; reconnectTimer = window.setTimeout(async () => { reconnectTimer = undefined; try { if (await serial.reconnect()) reconnectDelay = 250; else reconnectDelay = Math.min(5000, reconnectDelay * 2); } catch { reconnectDelay = Math.min(5000, reconnectDelay * 2); } if (serial.status.state !== 'connected') scheduleReconnect(); }, reconnectDelay); }
 function handleDeviceMessage(message: DeviceMessage): void { if (message.type !== 'button' || message.button !== 'play_pause' && message.button !== 'next_stage') return; const sequence = typeof message.sequence === 'number' ? message.sequence : 0; if (sequence <= lastButtonSequence) return; lastButtonSequence = sequence; dispatch({ type: message.button === 'play_pause' ? (activeRun?.state === 'running' ? 'pause' : activeRun ? 'resume' : 'start') : 'next_stage', ...(message.button === 'play_pause' && !activeRun ? { preset: configuredSnapshot() } : {}) } as TimerAction); }
 
-serial.onStatus(updateDeviceUi); serial.onMessage(handleDeviceMessage); serial.onReady(() => { lastButtonSequence = 0; applyOutputs(true, 0); });
+serial.onStatus(updateDeviceUi); serial.onMessage(handleDeviceMessage); serial.onReady(() => { lastButtonSequence = 0; void applyOutputs(true, 0).catch(() => undefined); });
 render();
 document.addEventListener('visibilitychange', () => { void syncWakeLock(); updateWarnings(); });
 window.addEventListener('click', (event) => { const picker = document.querySelector('.preset-picker'); if (picker?.contains(event.target as Node)) return; const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (menu && toggle) { menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } });

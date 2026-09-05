@@ -107,7 +107,8 @@ export function reduceTimer(previous: TimerRun | null, action: TimerAction, cloc
   }
   const afterStage = effectiveStage(run, clock);
   run.lastEffectiveStageIndex = afterStage;
-  return { run, stageChanged: afterStage !== beforeStage, chime: afterStage > beforeStage && run.state === 'running' };
+  const enteredStage = run.preset.stages[afterStage];
+  return { run, stageChanged: afterStage !== beforeStage, chime: afterStage > beforeStage && run.state === 'running' && enteredStage?.buzzer === 'once' };
 }
 
 export function deriveOutputs(run: TimerRun | null, clock: TimerClock): HardwareOutputs {

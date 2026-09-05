@@ -21,6 +21,7 @@ test('fake clock covers start, thresholds, pause, resume, and elapsed beyond dur
   assert.equal(result.chime, true);
   result = timer.reduceTimer(result.run, { type: 'tick' }, at(12000));
   assert.equal(result.run.state, 'running');
+  assert.equal(result.chime, false);
   assert.equal(timer.elapsedSeconds(result.run, at(12000)), 12);
   assert.equal(timer.deriveOutputs(result.run, at(12000)).buzzerMode, 'repeat');
   result = timer.reduceTimer(result.run, { type: 'pause' }, at(12000));
@@ -34,6 +35,10 @@ test('next stage is a manual override and reset clears the run', () => {
   result = timer.reduceTimer(result.run, { type: 'next_stage' }, at(1000));
   assert.equal(result.run.accumulatedElapsed, 0);
   assert.equal(timer.effectiveStage(result.run, at(1000)), 1);
+  assert.equal(result.chime, true);
+  result = timer.reduceTimer(result.run, { type: 'next_stage' }, at(1500));
+  assert.equal(timer.effectiveStage(result.run, at(1500)), 2);
+  assert.equal(result.chime, false);
   result = timer.reduceTimer(result.run, { type: 'reset' }, at(2000));
   assert.equal(result.run, null);
 });
