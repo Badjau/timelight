@@ -14,17 +14,19 @@ function fakePort({ ignoreFirstHello = false, retryOutput = false, ignoreOutput 
   let buzzCount = 0;
   let heldOutput;
   const writes = [];
-  const readable = new ReadableStream({ start(value) { controller = value; if (bootReady) queueMicrotask(() => controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ready', firmware: 'boot', ledCount: 116 }) + '\n'))); } });
+  const wire = (message) => serialModule.encodeWireMessage({ version: 4, requestId: 0, ...message });
+  const readable = new ReadableStream({ start(value) { controller = value; if (bootReady) queueMicrotask(() => controller.enqueue(wire({ type: 'ready', firmware: '0.5.0', ledCount: 116 }))); } });
   const writable = new WritableStream({ write(chunk) {
-    const message = JSON.parse(new TextDecoder().decode(chunk)); writes.push(message);
-    if (message.type === 'hello') { helloCount++; if (ignoreFirstHello && helloCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ready', requestId: message.requestId, firmware: 'test', ledCount: 116, ...(standalone ? { capabilities: ['standalone-preset'] } : {}) }) + '\n')); }
-    if (message.type === 'set_outputs') { outputCount++; if (ignoreOutput || retryOutput && outputCount === 1) return; if (holdOutputAck && outputCount === 1) { heldOutput = message; return; } if (malformedOutputAck && outputCount === 1) { controller.enqueue(new TextEncoder().encode('{bad-json\n')); return; } controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: message.revision }) + '\n')); }
-    if (message.type === 'buzz_once') { buzzCount++; if (retryBuzz && buzzCount === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: outputCount }) + '\n')); }
-    if (message.type === 'keepalive') controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId, appliedRevision: 0 }) + '\n'));
-    if (message.type === 'release_control') controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId }) + '\n'));
-    if (message.type === 'store_preset') { if (retryStore && writes.filter((item) => item.type === 'store_preset').length === 1) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: message.requestId }) + '\n')); }
+    const message = serialModule.decodeWireMessage(chunk.subarray(0, -1)); assert.ok(message); writes.push(message);
+    if (message.type === 'hello') { helloCount++; if (ignoreFirstHello && helloCount === 1) return; controller.enqueue(wire({ type: 'ready', requestId: message.requestId, firmware: '0.5.0', ledCount: 116, ...(standalone ? { capabilities: ['standalone-preset'] } : {}) })); }
+    if (message.type === 'ping') { controller.enqueue(wire({ type: 'pong', requestId: message.requestId })); controller.enqueue(wire({ type: 'ack', requestId: message.requestId })); }
+    if (message.type === 'set_outputs') { outputCount++; if (ignoreOutput || retryOutput && outputCount === 1) return; if (holdOutputAck && outputCount === 1) { heldOutput = message; return; } if (malformedOutputAck && outputCount === 1) { controller.enqueue(Uint8Array.of(2, 3, 4, 0)); return; } controller.enqueue(wire({ type: 'ack', requestId: message.requestId, appliedRevision: message.revision })); }
+    if (message.type === 'buzz_once') { buzzCount++; if (retryBuzz && buzzCount === 1) return; controller.enqueue(wire({ type: 'ack', requestId: message.requestId, appliedRevision: outputCount })); }
+    if (message.type === 'keepalive') controller.enqueue(wire({ type: 'ack', requestId: message.requestId, appliedRevision: 0 }));
+    if (message.type === 'release_control') controller.enqueue(wire({ type: 'ack', requestId: message.requestId }));
+    if (message.type === 'store_preset') { if (retryStore && writes.filter((item) => item.type === 'store_preset').length === 1) return; controller.enqueue(wire({ type: 'ack', requestId: message.requestId })); }
   } });
-  return { port: { readable, writable, async open() {}, async close() { controller.close(); } }, writes, feed(line) { controller.enqueue(new TextEncoder().encode(line + '\n')); }, feedRaw(value) { controller.enqueue(new TextEncoder().encode(value)); }, acknowledgeOutput() { if (!heldOutput) return; controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: 3, type: 'ack', requestId: heldOutput.requestId, appliedRevision: heldOutput.revision }) + '\n')); heldOutput = undefined; }, get helloCount() { return helloCount; } };
+  return { port: { readable, writable, async open() {}, async close() { controller.close(); } }, writes, feed(message) { controller.enqueue(wire(message)); }, feedRaw(value) { controller.enqueue(value); }, acknowledgeOutput() { if (!heldOutput) return; controller.enqueue(wire({ type: 'ack', requestId: heldOutput.requestId, appliedRevision: heldOutput.revision })); heldOutput = undefined; }, get helloCount() { return helloCount; } };
 }
 
 test('handshake retries a missed boot message and malformed input remains recoverable', async () => {
@@ -34,7 +36,7 @@ test('handshake retries a missed boot message and malformed input remains recove
   await serial.connect();
   assert.equal(serial.status.state, 'connected');
   assert.ok(fake.helloCount >= 2);
-  fake.feed('{not-json');
+  fake.feedRaw(Uint8Array.of(2, 3, 4, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(serial.status.warning, true);
   // A malformed line is handled by the reader without changing the connected state.
@@ -53,14 +55,25 @@ test('boot ready does not authorize output before the hello session is establish
   await serial.disconnect();
 });
 
+test('health check receives pong and acknowledgement frames', async () => {
+  const fake = fakePort();
+  const serial = new serialModule.ArduinoSerial({ async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } });
+  const received = [];
+  serial.onMessage((message) => received.push(message.type));
+  await serial.connect();
+  await serial.ping();
+  assert.ok(received.includes('pong'));
+  await serial.disconnect();
+});
+
 test('a ready frame survives a controller reset that truncates the preceding response', async () => {
   const fake = fakePort();
   const serial = new serialModule.ArduinoSerial({ async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } });
   let readyCount = 0;
   serial.onReady(() => { readyCount++; });
   await serial.connect();
-  fake.feedRaw('{"version":3,"type":"ack","requestId":"interrupted');
-  fake.feed(JSON.stringify({ version: 3, type: 'ready', firmware: 'test-reset', ledCount: 116 }));
+  const ready = serialModule.encodeWireMessage({ version: 4, type: 'ready', requestId: 0, firmware: '0.5.0', ledCount: 116 });
+  fake.feedRaw(Uint8Array.from([9, 9, ...ready]));
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(serial.status.state, 'connected');
   assert.equal(serial.status.warning, undefined);
@@ -157,14 +170,14 @@ test('standalone capability gates exact compact preset serialization and retries
   await serial.storePreset(preset);
   const stores = fake.writes.filter((message) => message.type === 'store_preset');
   assert.equal(stores.length, 2);
-  assert.deepEqual(stores[0], { version: 3, requestId: stores[0].requestId, type: 'store_preset', sessionId: serial.browserSessionId, duration: preset.duration, stages: preset.stages.map(({ threshold, color, blink, buzzer }) => [threshold, color, blink, buzzer]) });
-  assert.equal(JSON.stringify(stores[0]).includes(' '), false);
-  assert.ok(JSON.stringify(stores[0]).length < 336);
+  assert.deepEqual(stores[0], { version: 4, requestId: stores[0].requestId, type: 'store_preset', sessionId: serial.browserSessionId, duration: preset.duration, stages: preset.stages.map(({ threshold, color, blink, buzzer }) => [threshold, color, blink, buzzer]) });
+  assert.ok(Number.isInteger(stores[0].requestId));
+  assert.ok(serialModule.encodeWireMessage(stores[0]).length <= 63);
   await serial.disconnect();
   assert.equal(fake.writes.at(-1).type, 'release_control');
 });
 
-test('older protocol-v3 firmware connects but rejects standalone storage locally', async () => {
+test('firmware without standalone capability rejects standalone storage locally', async () => {
   const fake = fakePort();
   const serial = new serialModule.ArduinoSerial({ async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } });
   await serial.connect();
@@ -186,7 +199,7 @@ test('MCU reset re-handshakes, resynchronizes current outputs, and reconnects a 
     if (readyCount > 1) void serial.setOutputs({ revision: 7, color: '#ff0000', ledEffect: 'solid', transitionMs: 0, animationState: 'playing', buzzerMode: 'none' }).catch(() => undefined);
   });
   await serial.connect();
-  first.feed(JSON.stringify({ version: 3, type: 'ready', firmware: 'test-reset', ledCount: 116 }));
+  first.feed({ type: 'ready', requestId: 0, firmware: '0.5.0', ledCount: 116 });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(serial.status.state, 'connected');
   assert.ok(readyCount >= 2);

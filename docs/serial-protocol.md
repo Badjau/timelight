@@ -1,61 +1,70 @@
-# TimeLight serial protocol v3
+# TimeLight serial protocol v4
 
-Protocol v3 supports two exclusive owners. A browser session is authoritative whenever its lease is active; otherwise firmware 0.4.0 can run one EEPROM-backed preset locally. Older v3 firmware remains compatible for browser-owned timing but does not advertise standalone storage.
+Protocol v4 is a compact binary protocol for firmware 0.5.0. The website and controller must be upgraded together; protocol-v3 JSON firmware cannot parse v4 frames.
 
-Messages are compact, newline-delimited UTF-8 JSON at 115200 baud (8-N-1). Commands carry a `requestId`; the browser retries an unacknowledged request twice after 500 ms, using the same command content. The controller acknowledges with `{"version":3,"type":"ack","requestId":"...","appliedRevision":12}` or returns an `error` with the same request ID.
+## Framing
+
+Communication is 115200 baud (8-N-1). Each decoded frame contains:
+
+| Offset | Size | Value |
+| --- | ---: | --- |
+| 0 | 2 | Magic bytes `54 4c` (`TL`) |
+| 2 | 1 | Protocol version `04` |
+| 3 | 1 | Message type |
+| 4 | 4 | Unsigned request ID, little-endian; zero means unsolicited |
+| 8 | 2 | Payload length, little-endian |
+| 10 | n | Message payload |
+| 10+n | 2 | CRC-16/MODBUS over every preceding byte |
+
+The decoded frame is COBS-encoded and terminated by `00`. COBS provides an unambiguous frame delimiter; the length and CRC reject incomplete or corrupted frames. All multi-byte integers are unsigned and little-endian. Commands are retried twice after 500 ms with the same request ID and content.
+
+| Code | Message | Payload |
+| ---: | --- | --- |
+| 1 | `hello` | session ID `u32` |
+| 2 | `ready` | LED count `u16`, firmware major/minor/patch `u8x3`, button flags `u8`, capability flags `u8` |
+| 3 | `ack` | applied output revision `u32` |
+| 4 | `error` | error code `u8` |
+| 5 | `ping` | empty |
+| 6 | `pong` | empty |
+| 7 | `keepalive` | session ID `u32` |
+| 8 | `release_control` | session ID `u32` |
+| 9 | `set_outputs` | fixed output snapshot described below |
+| 10 | `buzz_once` | session ID `u32`, event ID `u32` |
+| 11 | `store_preset` | compact preset described below |
+| 12 | `button` | button code `u8`, sequence `u32` |
 
 ## Handshake and ownership
 
-The browser sends `hello` every 250 ms for up to eight seconds:
+The browser sends `hello` every 250 ms for up to eight seconds. A valid hello cancels standalone timing, turns outputs off, claims a three-second browser lease, and receives a correlated `ready`. Boot and lease expiry send an unsolicited `ready` with request ID zero. A connected browser responds by handshaking again and restoring its current output snapshot.
 
-```json
-{"version":3,"requestId":"...","type":"hello","sessionId":"browser-session-id"}
-```
+The browser sends `keepalive` once per second. Every valid session command renews the lease. `release_control` releases a manual disconnect immediately. Release or lease expiry clears volatile timer state and turns every output off.
 
-A valid hello immediately cancels standalone timing, turns outputs off, establishes a three-second browser lease, and returns:
+The `ready` button bits are play/pause, next stage, and reset in bits 0-2. Capability bit 0 is `standalone-preset`. Button codes 1-3 use the same order.
 
-```json
-{"version":3,"type":"ready","requestId":"...","device":"timelight-arduino","firmware":"0.4.0","ledCount":116,"buttons":["play_pause","next_stage","reset"],"capabilities":["standalone-preset"]}
-```
+## Output snapshots
 
-The browser sends session-bound `keepalive` once per second. Every valid session command renews the lease. `release_control` immediately releases a manual disconnect:
+`set_outputs` has an 18-byte payload: session ID `u32`, revision `u32`, RGB color `u8x3`, LED effect `u8`, transition milliseconds `u16`, animation state `u8`, buzzer mode `u8`, and buzzer lease milliseconds `u16`.
 
-```json
-{"version":3,"requestId":"...","type":"release_control","sessionId":"browser-session-id"}
-```
-
-Release or lease expiry clears volatile timer state and turns LEDs, animation, and sound off. On unexpected expiry the controller emits an unsolicited `ready`, allowing an open page to handshake again. Boot also emits unsolicited `ready`; a connected browser responds by re-handshaking and sending its current output snapshot. `ping` returns `pong` and an acknowledgement.
-
-## Browser output commands
-
-`set_outputs` remains the complete declarative browser-owned output snapshot. Revisions deduplicate retries. Effects are `off`, `solid`, or `blink`; animation is `playing` or `paused`; buzzer mode is `none` or `repeat`. A newly commanded color may transition for up to 5000 ms. Blink and transitions run on the controller, and paused animation freezes the rendered frame.
-
-```json
-{"version":3,"requestId":"...","type":"set_outputs","sessionId":"browser-session-id","revision":12,"color":"#ff0000","ledEffect":"blink","transitionMs":1000,"animationState":"playing","buzzerMode":"repeat","leaseMs":3000}
-```
-
-One-shot chimes remain retry-safe through a session-scoped event ID:
-
-```json
-{"version":3,"requestId":"...","type":"buzz_once","sessionId":"browser-session-id","eventId":"run-id:stage-index"}
-```
+LED effects are off `0`, solid `1`, and blink `2`. Animation is paused `0` or playing `1`. Browser output buzzer mode is none `0` or repeat `2`. Revisions and one-shot event IDs make retries idempotent.
 
 ## Standalone preset storage
 
-Only controllers whose `ready.capabilities` contains `standalone-preset` accept `store_preset`. It is acknowledged, session-bound, and contains only timing/output data. Stage count is 3–5, thresholds are strictly increasing and below duration, colors are six-digit CSS hex values, and buzzer is `none`, `once`, or `repeat`.
+`store_preset` contains session ID `u32`, duration seconds `u32`, stage count `u8`, followed by 3-5 eight-byte stages. Each stage contains threshold seconds `u32`, RGB `u8x3`, and flags `u8`. Flags use bits 0-1 for buzzer mode (none `0`, once `1`, repeat `2`) and bit 2 for blink.
 
-```json
-{"version":3,"requestId":"...","type":"store_preset","sessionId":"browser-session-id","duration":180,"stages":[[0,"#0000ff",false,"none"],[60,"#ffff00",false,"once"],[120,"#ff0000",true,"repeat"]]}
+The maximum five-stage preset payload is 49 bytes and its complete COBS wire frame is at most 63 bytes. It no longer depends on a large receive buffer or textual field lengths.
+
+Only this explicit command writes EEPROM. Two checksummed, versioned slots protect the previous preset from an interrupted write. Runtime elapsed time, stage, and pause state remain volatile, and boot always starts idle/off.
+
+## Diagnostics
+
+Connection lifecycle, retries, malformed frames, and failures are logged to the browser console with a `[TimeLight serial]` prefix. To include per-frame transmit/receive summaries, run this in DevTools and reload:
+
+```js
+localStorage.setItem('timelight-serial-debug', '1')
 ```
 
-Each compact stage tuple is `[threshold, color, blink, buzzer]`. This bounded representation keeps the complete five-stage command within the Nano's receive buffer without taking memory needed by the LED strip.
+Disable verbose frame logging with:
 
-Only this explicit command writes EEPROM. Save and Connect do not. Firmware stores fixed-width data in alternating versioned slots with monotonic sequence numbers and checksums, committing the magic marker last. It loads the newest valid slot at boot and uses the compiled four-stage default if both slots are empty or corrupt. Elapsed time, current stage, and pause state are never stored. Storing while connected resets any dormant standalone run without changing current browser-owned outputs.
-
-## Buttons and standalone behavior
-
-During a browser lease, controls only produce sequenced events: `play_pause`, `next_stage`, or `reset`. Reset is emitted when Next is held for three seconds; a short Next is emitted on release, so a long hold never advances first. The website routes all three through its timer reducer.
-
-Without a browser owner, Play/Pause starts at stage 1, pauses while preserving elapsed time and the exact light frame, and resumes. Thresholds automatically select colors, blinking, one-shot chimes, and repeating alerts; the final stage continues indefinitely. Short Next while running or paused anchors elapsed time at the next stage threshold. It renders that stage immediately, stays paused when applicable, and does nothing while idle or final. Holding Next for three seconds resets and turns every output off immediately.
-
-Runtime state always boots idle/off. Connecting mid-run cancels standalone operation. After manual release or a three-second unexpected-loss timeout, the device is idle/off and the stored preset can be started locally again.
+```js
+localStorage.removeItem('timelight-serial-debug')
+```

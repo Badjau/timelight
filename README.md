@@ -4,7 +4,7 @@ TimeLight is a programmable visual timing system for speeches, presentations, de
 
 The website owns timer state whenever it is connected: it stores preset snapshots, derives elapsed time from timestamps, selects stages, and routes screen and physical controls through one reducer. Active browser runs survive refreshes and continue beyond the configured duration in the final stage until Pause or Reset. The site remains fully usable without hardware.
 
-The optional Arduino Nano can also run one device-owned preset when no browser session is active. The paper-plane Send action explicitly stores the current editor values—including unsaved edits—in dual checksummed EEPROM slots. Save and Connect never overwrite device memory. Timer progress remains volatile, so reset and power-up are always idle/off. Protocol v3 capability detection keeps older browser-only v3 firmware usable.
+The optional Arduino Nano can also run one device-owned preset when no browser session is active. The paper-plane Send action explicitly stores the current editor values—including unsaved edits—in dual checksummed EEPROM slots. Save and Connect never overwrite device memory. Timer progress remains volatile, so reset and power-up are always idle/off. Binary protocol v4 keeps even a five-stage preset below 64 bytes on the wire.
 
 ## Local development
 
@@ -22,6 +22,8 @@ Check the production build locally with `npm run build` and `npm run preview`; o
 Use desktop Chrome or Microsoft Edge over the HTTPS production origin. A handshake gives the browser exclusive control and immediately cancels any standalone run. Manual disconnect releases the controller idle/off at once; unexpected loss does so after the three-second keepalive lease and then advertises readiness for recovery. Offline, Play/Pause starts or pauses the stored preset, short Next advances on release, and a three-second Next hold resets. During browser ownership those gestures are routed to the website instead. The default strip is 116 WS2812 LEDs on D6; the buzzer is D7, play/pause is D4, and next-stage is D5. Some Nano variants use a CH340 USB-to-serial chip and may need an operating-system driver.
 
 See [`docs/serial-protocol.md`](docs/serial-protocol.md) and [`arduino/README.md`](arduino/README.md) for the complete protocol and upload instructions.
+
+Protocol v4 requires firmware 0.5.0 and the matching website. Connection lifecycle and errors appear in DevTools with a `[TimeLight serial]` prefix. Set `localStorage['timelight-serial-debug'] = '1'` and reload to include per-frame summaries.
 
 ### Nano LED transition troubleshooting
 

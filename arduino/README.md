@@ -1,6 +1,6 @@
 # TimeLight Arduino controller
 
-`TimeLightController.ino` is the standalone-capable protocol-v3 controller (firmware 0.4.0). An active browser lease owns all timing and outputs. With no browser owner, the controller runs its stored preset from the physical buttons.
+`TimeLightController.ino` is the standalone-capable binary protocol-v4 controller (firmware 0.5.0). An active browser lease owns all timing and outputs. With no browser owner, the controller runs its stored preset from the physical buttons.
 
 ## Wiring
 
@@ -19,4 +19,4 @@ Offline, Play/Pause starts, pauses, and resumes. A short Next release advances a
 
 A browser `hello` immediately cancels standalone operation. While its lease is active, the buttons report events to the website and Next's three-second hold reports Reset. Manual disconnect releases ownership immediately. If USB or the page disappears unexpectedly, the controller waits for the three-second keepalive lease, then becomes idle/off and advertises `ready` so an open page can recover. Browser snapshots retain complete control of fades, blinking, and buzzers.
 
-The complete contract is in [`../docs/serial-protocol.md`](../docs/serial-protocol.md).
+The website and sketch must be upgraded together because protocol-v3 JSON firmware is not wire-compatible. The complete binary framing contract is in [`../docs/serial-protocol.md`](../docs/serial-protocol.md).

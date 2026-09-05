@@ -1,6 +1,8 @@
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const DEFAULT_BAUD_RATE = 115200;
 export const OUTPUT_LEASE_MS = 3000;
+const MAGIC = [0x54, 0x4c] as const;
+const MAX_WIRE_FRAME = 96;
 
 export type SerialConnectionState = 'unsupported' | 'disconnected' | 'connecting' | 'connected' | 'error';
 export type LedEffect = 'off' | 'solid' | 'blink';
@@ -9,154 +11,86 @@ export type ControllerBuzzerMode = 'none' | 'once' | 'repeat';
 export type ControllerStage = { threshold: number; color: string; blink: boolean; buzzer: ControllerBuzzerMode };
 export type ControllerPreset = { duration: number; stages: ControllerStage[] };
 export type OutputSnapshot = { revision: number; color: string; ledEffect: LedEffect; transitionMs: number; animationState: 'playing' | 'paused'; buzzerMode: BuzzerMode };
-export type DeviceMessage = { version?: number; type?: string; [key: string]: unknown };
-export type ReadyMessage = DeviceMessage & { type: 'ready'; firmware?: string; ledCount?: number; buttons?: string[]; capabilities?: string[]; requestId?: string };
+export type DeviceMessage = { version?: number; type?: string; requestId?: number; [key: string]: unknown };
+export type ReadyMessage = DeviceMessage & { type: 'ready'; firmware?: string; ledCount?: number; buttons?: string[]; capabilities?: string[] };
 export type ButtonMessage = DeviceMessage & { type: 'button'; button?: string; sequence?: number };
 export type SerialStatus = { state: SerialConnectionState; message: string; firmware?: string; warning?: boolean; ledCount?: number; capabilities?: string[] };
-
 export interface SerialPortLike { readable: ReadableStream<Uint8Array> | null; writable: WritableStream<Uint8Array> | null; open(options: { baudRate: number }): Promise<void>; close(): Promise<void> }
 export interface SerialLike { requestPort(): Promise<SerialPortLike>; getPorts(): Promise<SerialPortLike[]> }
 declare global { interface Navigator { serial?: SerialLike } }
+
+const frameTypes = { hello: 1, ready: 2, ack: 3, error: 4, ping: 5, pong: 6, keepalive: 7, release_control: 8, set_outputs: 9, buzz_once: 10, store_preset: 11, button: 12 } as const;
+const typeNames = Object.fromEntries(Object.entries(frameTypes).map(([name, code]) => [code, name])) as Record<number, string>;
+const errorMessages: Record<number, string> = { 1: 'Malformed frame', 2: 'Unsupported protocol version', 3: 'Unknown browser session', 4: 'Invalid output snapshot', 5: 'Invalid standalone preset', 6: 'Unsupported command' };
+const effects: LedEffect[] = ['off', 'solid', 'blink'];
+const buzzers: ControllerBuzzerMode[] = ['none', 'once', 'repeat'];
+
 function serialApi(): SerialLike | undefined { return typeof navigator === 'undefined' ? undefined : navigator.serial; }
-function requestId(): string { return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+function randomId(): number { const values = new Uint32Array(1); if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(values); else values[0] = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0; return values[0] || 1; }
+function debugEnabled(): boolean { try { return globalThis.localStorage?.getItem('timelight-serial-debug') === '1'; } catch { return false; } }
+function crc16(bytes: Uint8Array): number { let crc = 0xffff; for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xa001 : crc >>> 1; } return crc; }
+function put16(view: DataView, offset: number, value: number): void { view.setUint16(offset, value, true); }
+function put32(view: DataView, offset: number, value: number): void { view.setUint32(offset, value >>> 0, true); }
+function colorNumber(color: unknown): number { if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) throw new Error('Invalid controller color.'); return Number.parseInt(color.slice(1), 16); }
+function colorText(value: number): string { return `#${value.toString(16).padStart(6, '0')}`; }
+function eventHash(value: string): number { let hash = 2166136261; for (let index = 0; index < value.length; index++) { hash ^= value.charCodeAt(index); hash = Math.imul(hash, 16777619); } return hash >>> 0 || 1; }
+function cobsEncode(input: Uint8Array): Uint8Array { const output = new Uint8Array(input.length + Math.ceil(input.length / 254) + 1); let read = 0, write = 1, codeIndex = 0, code = 1; while (read < input.length) { if (!input[read]) { output[codeIndex] = code; codeIndex = write++; code = 1; read++; } else { output[write++] = input[read++]; if (++code === 0xff) { output[codeIndex] = code; codeIndex = write++; code = 1; } } } output[codeIndex] = code; return output.slice(0, write); }
+function cobsDecode(input: Uint8Array): Uint8Array | null { const output = new Uint8Array(input.length); let read = 0, write = 0; while (read < input.length) { const code = input[read++]; if (!code || read + code - 1 > input.length) return null; for (let index = 1; index < code; index++) output[write++] = input[read++]; if (code !== 0xff && read < input.length) output[write++] = 0; } return output.slice(0, write); }
+
+function payloadFor(message: DeviceMessage): Uint8Array {
+  const session = Number(message.sessionId) >>> 0;
+  if (message.type === 'hello' || message.type === 'keepalive' || message.type === 'release_control') { const out = new Uint8Array(4); put32(new DataView(out.buffer), 0, session); return out; }
+  if (message.type === 'ready') { const out = new Uint8Array(7); const view = new DataView(out.buffer); const version = typeof message.firmware === 'string' ? message.firmware.split('.').map(Number) : [0, 5, 0]; put16(view, 0, Number(message.ledCount) || 116); out.set(version.slice(0, 3).map((part) => Number.isInteger(part) ? part : 0), 2); out[5] = 0b111; out[6] = Array.isArray(message.capabilities) && message.capabilities.includes('standalone-preset') ? 1 : 0; return out; }
+  if (message.type === 'ack') { const out = new Uint8Array(4); put32(new DataView(out.buffer), 0, Number(message.appliedRevision) || 0); return out; }
+  if (message.type === 'error') return Uint8Array.of(Number(message.errorCode) || 1);
+  if (message.type === 'button') { const out = new Uint8Array(5); out[0] = message.button === 'play_pause' ? 1 : message.button === 'next_stage' ? 2 : 3; put32(new DataView(out.buffer), 1, Number(message.sequence) || 0); return out; }
+  if (message.type === 'set_outputs') { const out = new Uint8Array(18); const view = new DataView(out.buffer); const color = colorNumber(message.color); put32(view, 0, session); put32(view, 4, Number(message.revision)); out[8] = color >> 16; out[9] = color >> 8; out[10] = color; out[11] = effects.indexOf(message.ledEffect as LedEffect); put16(view, 12, Number(message.transitionMs)); out[14] = message.animationState === 'playing' ? 1 : 0; out[15] = message.buzzerMode === 'repeat' ? 2 : 0; put16(view, 16, Number(message.leaseMs)); return out; }
+  if (message.type === 'buzz_once') { const out = new Uint8Array(8); const view = new DataView(out.buffer); put32(view, 0, session); put32(view, 4, typeof message.eventId === 'number' ? message.eventId : eventHash(String(message.eventId))); return out; }
+  if (message.type === 'store_preset') { const stages = message.stages as Array<[number, string, boolean, ControllerBuzzerMode]>; const out = new Uint8Array(9 + stages.length * 8); const view = new DataView(out.buffer); put32(view, 0, session); put32(view, 4, Number(message.duration)); out[8] = stages.length; stages.forEach(([threshold, color, blink, buzzer], index) => { const offset = 9 + index * 8, parsed = colorNumber(color); put32(view, offset, threshold); out[offset + 4] = parsed >> 16; out[offset + 5] = parsed >> 8; out[offset + 6] = parsed; out[offset + 7] = (blink ? 4 : 0) | buzzers.indexOf(buzzer); }); return out; }
+  return new Uint8Array();
+}
+
+export function encodeWireMessage(message: DeviceMessage): Uint8Array { const type = frameTypes[message.type as keyof typeof frameTypes]; if (!type) throw new Error(`Unsupported serial message type: ${message.type}`); const payload = payloadFor(message); const raw = new Uint8Array(12 + payload.length); const view = new DataView(raw.buffer); raw[0] = MAGIC[0]; raw[1] = MAGIC[1]; raw[2] = PROTOCOL_VERSION; raw[3] = type; put32(view, 4, Number(message.requestId) || 0); put16(view, 8, payload.length); raw.set(payload, 10); put16(view, raw.length - 2, crc16(raw.subarray(0, raw.length - 2))); const encoded = cobsEncode(raw), wire = new Uint8Array(encoded.length + 1); wire.set(encoded); return wire; }
+export function decodeWireMessage(encoded: Uint8Array): DeviceMessage | null {
+  const raw = cobsDecode(encoded); if (!raw || raw.length < 12 || raw[0] !== MAGIC[0] || raw[1] !== MAGIC[1] || raw[2] !== PROTOCOL_VERSION) return null; const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength), payloadLength = view.getUint16(8, true); if (raw.length !== 12 + payloadLength || view.getUint16(raw.length - 2, true) !== crc16(raw.subarray(0, raw.length - 2))) return null; const type = typeNames[raw[3]]; if (!type) return null; const requestId = view.getUint32(4, true), p = raw.subarray(10, raw.length - 2), pv = new DataView(p.buffer, p.byteOffset, p.byteLength), message: DeviceMessage = { version: PROTOCOL_VERSION, type, requestId };
+  if ((type === 'hello' || type === 'keepalive' || type === 'release_control') && p.length === 4) message.sessionId = pv.getUint32(0, true);
+  else if (type === 'ready' && p.length === 7) { message.ledCount = pv.getUint16(0, true); message.firmware = `${p[2]}.${p[3]}.${p[4]}`; message.buttons = ['play_pause', 'next_stage', 'reset'].filter((_, index) => p[5] & (1 << index)); message.capabilities = p[6] & 1 ? ['standalone-preset'] : []; }
+  else if (type === 'ack' && p.length === 4) message.appliedRevision = pv.getUint32(0, true);
+  else if (type === 'error' && p.length === 1) { message.errorCode = p[0]; message.message = errorMessages[p[0]] ?? 'Controller rejected the command'; }
+  else if (type === 'button' && p.length === 5) { message.button = p[0] === 1 ? 'play_pause' : p[0] === 2 ? 'next_stage' : 'reset'; message.sequence = pv.getUint32(1, true); }
+  else if (type === 'set_outputs' && p.length === 18) { message.sessionId = pv.getUint32(0, true); message.revision = pv.getUint32(4, true); message.color = colorText(p[8] << 16 | p[9] << 8 | p[10]); message.ledEffect = effects[p[11]]; message.transitionMs = pv.getUint16(12, true); message.animationState = p[14] ? 'playing' : 'paused'; message.buzzerMode = p[15] === 2 ? 'repeat' : 'none'; message.leaseMs = pv.getUint16(16, true); }
+  else if (type === 'buzz_once' && p.length === 8) { message.sessionId = pv.getUint32(0, true); message.eventId = pv.getUint32(4, true); }
+  else if (type === 'store_preset' && p.length >= 9 && p.length === 9 + p[8] * 8) { message.sessionId = pv.getUint32(0, true); message.duration = pv.getUint32(4, true); message.stages = Array.from({ length: p[8] }, (_, index) => { const offset = 9 + index * 8, flags = p[offset + 7]; return [pv.getUint32(offset, true), colorText(p[offset + 4] << 16 | p[offset + 5] << 8 | p[offset + 6]), Boolean(flags & 4), buzzers[flags & 3]]; }); }
+  else if (p.length || !['ping', 'pong'].includes(type)) return null; return message;
+}
+
 type PendingAck = { resolve: (message: DeviceMessage) => void; reject: (error: Error) => void };
-
 export class ArduinoSerial {
-  private port: SerialPortLike | null = null;
-  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
-  private writeQueue: Promise<void> = Promise.resolve();
-  private requestQueue: Promise<void> = Promise.resolve();
-  private readLoopTask: Promise<void> | null = null;
-  private lineBuffer = '';
-  private readyResolver: (() => void) | null = null;
-  private readyRejecter: ((error: Error) => void) | null = null;
-  private readyTimer: number | undefined;
-  private keepaliveTimer: number | undefined;
-  private pending = new Map<string, PendingAck>();
-  private outputPending: OutputSnapshot | null = null;
-  private outputTask: Promise<void> | null = null;
-  private sessionId = requestId();
-  private listeners = new Set<(status: SerialStatus) => void>();
-  private messageListeners = new Set<(message: DeviceMessage) => void>();
-  private readyListeners = new Set<(message: ReadyMessage) => void>();
-  private currentStatus: SerialStatus = serialApi() ? { state: 'disconnected', message: 'Connect an Arduino controller' } : { state: 'unsupported', message: 'Web Serial requires desktop Chrome or Edge' };
-
+  private port: SerialPortLike | null = null; private reader: ReadableStreamDefaultReader<Uint8Array> | null = null; private writer: WritableStreamDefaultWriter<Uint8Array> | null = null; private writeQueue: Promise<void> = Promise.resolve(); private requestQueue: Promise<void> = Promise.resolve(); private readLoopTask: Promise<void> | null = null; private frameBuffer: number[] = [];
+  private readyResolver: (() => void) | null = null; private readyRejecter: ((error: Error) => void) | null = null; private readyTimer: number | undefined; private keepaliveTimer: number | undefined; private pending = new Map<number, PendingAck>(); private outputPending: OutputSnapshot | null = null; private outputTask: Promise<void> | null = null; private sessionId = randomId();
+  private listeners = new Set<(status: SerialStatus) => void>(); private messageListeners = new Set<(message: DeviceMessage) => void>(); private readyListeners = new Set<(message: ReadyMessage) => void>(); private currentStatus: SerialStatus = serialApi() ? { state: 'disconnected', message: 'Connect an Arduino controller' } : { state: 'unsupported', message: 'Web Serial requires desktop Chrome or Edge' };
   constructor(private readonly api: SerialLike | undefined = serialApi()) {}
-  get status(): SerialStatus { return this.currentStatus; }
-  get supportsStandalonePreset(): boolean { return this.currentStatus.state === 'connected' && this.currentStatus.capabilities?.includes('standalone-preset') === true; }
-  get browserSessionId(): string { return this.sessionId; }
-  onStatus(listener: (status: SerialStatus) => void): () => void { this.listeners.add(listener); listener(this.currentStatus); return () => this.listeners.delete(listener); }
-  onMessage(listener: (message: DeviceMessage) => void): () => void { this.messageListeners.add(listener); return () => this.messageListeners.delete(listener); }
-  onReady(listener: (message: ReadyMessage) => void): () => void { this.readyListeners.add(listener); return () => this.readyListeners.delete(listener); }
-
-  async connect(port?: SerialPortLike): Promise<void> {
-    if (!this.api) { this.setStatus({ state: 'unsupported', message: 'Web Serial requires desktop Chrome or Edge' }); throw new Error('Web Serial is not supported by this browser.'); }
-    if (this.currentStatus.state === 'connected') return;
-    this.setStatus({ state: 'connecting', message: 'Connecting to the TimeLight controller' });
-    try {
-      this.port = port ?? await this.api.requestPort(); await this.port.open({ baudRate: DEFAULT_BAUD_RATE }); this.startReading(); await this.waitForReady();
-      this.setStatus({ state: 'connected', message: 'Controller ready', firmware: this.currentStatus.firmware, ledCount: this.currentStatus.ledCount, capabilities: this.currentStatus.capabilities }); this.startKeepalive();
-    } catch (error) { await this.closePort(); const message = error instanceof Error ? error.message : 'Could not connect to the controller'; this.setStatus({ state: 'error', message }); throw error; }
-  }
+  get status(): SerialStatus { return this.currentStatus; } get supportsStandalonePreset(): boolean { return this.currentStatus.state === 'connected' && this.currentStatus.capabilities?.includes('standalone-preset') === true; } get browserSessionId(): number { return this.sessionId; }
+  onStatus(listener: (status: SerialStatus) => void): () => void { this.listeners.add(listener); listener(this.currentStatus); return () => this.listeners.delete(listener); } onMessage(listener: (message: DeviceMessage) => void): () => void { this.messageListeners.add(listener); return () => this.messageListeners.delete(listener); } onReady(listener: (message: ReadyMessage) => void): () => void { this.readyListeners.add(listener); return () => this.readyListeners.delete(listener); }
+  async connect(port?: SerialPortLike): Promise<void> { if (!this.api) { this.setStatus({ state: 'unsupported', message: 'Web Serial requires desktop Chrome or Edge' }); throw new Error('Web Serial is not supported by this browser.'); } if (this.currentStatus.state === 'connected') return; this.log('info', 'connecting', { protocol: PROTOCOL_VERSION, baudRate: DEFAULT_BAUD_RATE }); this.setStatus({ state: 'connecting', message: 'Connecting to the TimeLight controller' }); try { this.port = port ?? await this.api.requestPort(); await this.port.open({ baudRate: DEFAULT_BAUD_RATE }); this.log('info', 'port opened'); this.startReading(); await this.waitForReady(); this.setStatus({ state: 'connected', message: 'Controller ready', firmware: this.currentStatus.firmware, ledCount: this.currentStatus.ledCount, capabilities: this.currentStatus.capabilities }); this.startKeepalive(); } catch (error) { await this.closePort(); const original = error instanceof Error ? error.message : 'Could not connect to the controller', message = /Timed out/.test(original) ? 'Timed out waiting for protocol-v4 firmware. Flash firmware 0.5.0, then reconnect.' : original; this.log('error', 'connection failed', { message }); this.setStatus({ state: 'error', message }); throw new Error(message); } }
   async reconnect(): Promise<boolean> { if (!this.api) return false; const ports = await this.api.getPorts(); if (!ports.length) return false; await this.closePort(); await this.connect(ports[0]); return true; }
-  async disconnect(): Promise<void> {
-    if (this.currentStatus.state === 'connected') await this.releaseControl().catch(() => undefined);
-    await this.closePort(); this.setStatus({ state: 'disconnected', message: 'Controller disconnected' });
-  }
-
-  async setOutputs(snapshot: OutputSnapshot): Promise<void> {
-    this.outputPending = snapshot;
-    while (this.outputPending) {
-      if (!this.outputTask) {
-        const task = (async () => { try { while (this.outputPending) { const next = this.outputPending; this.outputPending = null; await this.sendRequest({ type: 'set_outputs', sessionId: this.sessionId, revision: next.revision, color: next.color, ledEffect: next.ledEffect, transitionMs: next.transitionMs, animationState: next.animationState, buzzerMode: next.buzzerMode, leaseMs: next.buzzerMode === 'repeat' ? OUTPUT_LEASE_MS : 0 }); } } catch (error) { if (this.currentStatus.state === 'connected') this.setStatus({ state: 'error', message: 'Controller stopped acknowledging output; reconnecting' }); throw error; } })();
-        const tracked = task.finally(() => { if (this.outputTask === tracked) this.outputTask = null; });
-        this.outputTask = tracked;
-      }
-      await this.outputTask;
-    }
-  }
-  async buzzOnce(eventId: string): Promise<void> { await this.sendRequest({ type: 'buzz_once', sessionId: this.sessionId, eventId }); }
-  async ping(): Promise<void> { await this.sendRequest({ type: 'ping' }); }
-  async storePreset(preset: ControllerPreset): Promise<void> {
-    if (!this.supportsStandalonePreset) throw new Error('Controller firmware does not support standalone presets.');
-    await this.sendRequest({ type: 'store_preset', sessionId: this.sessionId, duration: preset.duration, stages: preset.stages.map(({ threshold, color, blink, buzzer }) => [threshold, color, blink, buzzer]) });
-  }
+  async disconnect(): Promise<void> { if (this.currentStatus.state === 'connected') await this.releaseControl().catch(() => undefined); await this.closePort(); this.setStatus({ state: 'disconnected', message: 'Controller disconnected' }); this.log('info', 'disconnected'); }
+  async setOutputs(snapshot: OutputSnapshot): Promise<void> { this.outputPending = snapshot; while (this.outputPending) { if (!this.outputTask) { const task = (async () => { try { while (this.outputPending) { const next = this.outputPending; this.outputPending = null; await this.sendRequest({ type: 'set_outputs', sessionId: this.sessionId, ...next, leaseMs: next.buzzerMode === 'repeat' ? OUTPUT_LEASE_MS : 0 }); } } catch (error) { if (this.currentStatus.state === 'connected') this.setStatus({ state: 'error', message: 'Controller stopped acknowledging output; reconnecting' }); throw error; } })(); const tracked = task.finally(() => { if (this.outputTask === tracked) this.outputTask = null; }); this.outputTask = tracked; } await this.outputTask; } }
+  async buzzOnce(eventId: string): Promise<void> { await this.sendRequest({ type: 'buzz_once', sessionId: this.sessionId, eventId }); } async ping(): Promise<void> { await this.sendRequest({ type: 'ping' }); }
+  async storePreset(preset: ControllerPreset): Promise<void> { if (!this.supportsStandalonePreset) throw new Error('Controller firmware does not support standalone presets.'); await this.sendRequest({ type: 'store_preset', sessionId: this.sessionId, duration: preset.duration, stages: preset.stages.map(({ threshold, color, blink, buzzer }) => [threshold, color, blink, buzzer]) }); }
   async releaseControl(): Promise<void> { await this.sendRequest({ type: 'release_control', sessionId: this.sessionId }); }
-
-  private sendRequest(payload: DeviceMessage, attempts = 3): Promise<DeviceMessage> {
-    const task = this.requestQueue.then(() => this.performRequest(payload, attempts));
-    this.requestQueue = task.then(() => undefined, () => undefined);
-    return task;
-  }
-  private async performRequest(payload: DeviceMessage, attempts: number): Promise<DeviceMessage> {
-    if (!this.port?.writable || (this.currentStatus.state !== 'connected' && payload.type !== 'hello')) throw new Error('Connect the Arduino controller before sending commands.');
-    const id = requestId();
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      const acknowledgement = this.waitForAck(id, 500);
-      acknowledgement.catch(() => undefined);
-      try { await this.write({ version: PROTOCOL_VERSION, requestId: id, ...payload }); return await acknowledgement; }
-      catch (error) {
-        const pending = this.pending.get(id);
-        if (pending) { this.pending.delete(id); pending.reject(error instanceof Error ? error : new Error('Serial write failed.')); }
-        if (attempt === attempts - 1) throw error;
-      }
-    }
-    throw new Error('The controller did not acknowledge the command.');
-  }
-  private async write(message: DeviceMessage): Promise<void> {
-    const task = this.writeQueue.then(async () => {
-      if (!this.port?.writable) throw new Error('The controller serial port is not writable.');
-      const writer = this.port.writable.getWriter(); this.writer = writer;
-      try { await writer.write(new TextEncoder().encode(JSON.stringify(message) + '\n')); }
-      finally { writer.releaseLock(); if (this.writer === writer) this.writer = null; }
-    });
-    this.writeQueue = task.catch(() => undefined);
-    return task;
-  }
-  private waitForAck(id: string, timeoutMs: number): Promise<DeviceMessage> { return new Promise((resolve, reject) => { const timeout = window.setTimeout(() => { this.pending.delete(id); reject(new Error(`Controller acknowledgement timed out for ${id}.`)); }, timeoutMs); this.pending.set(id, { resolve: (message) => { window.clearTimeout(timeout); resolve(message); }, reject: (error) => { window.clearTimeout(timeout); reject(error); } }); }); }
+  private sendRequest(payload: DeviceMessage, attempts = 3): Promise<DeviceMessage> { const task = this.requestQueue.then(() => this.performRequest(payload, attempts)); this.requestQueue = task.then(() => undefined, () => undefined); return task; }
+  private async performRequest(payload: DeviceMessage, attempts: number): Promise<DeviceMessage> { if (!this.port?.writable || (this.currentStatus.state !== 'connected' && payload.type !== 'hello')) throw new Error('Connect the Arduino controller before sending commands.'); const id = randomId(); for (let attempt = 1; attempt <= attempts; attempt++) { const acknowledgement = this.waitForAck(id, 500); acknowledgement.catch(() => undefined); try { await this.write({ version: PROTOCOL_VERSION, requestId: id, ...payload }, attempt); return await acknowledgement; } catch (error) { const pending = this.pending.get(id); if (pending) { this.pending.delete(id); pending.reject(error instanceof Error ? error : new Error('Serial write failed.')); } if (attempt === attempts) throw error; this.log('warn', 'request retry', { type: payload.type, requestId: id, nextAttempt: attempt + 1 }); } } throw new Error('The controller did not acknowledge the command.'); }
+  private async write(message: DeviceMessage, attempt = 1): Promise<void> { const wire = encodeWireMessage(message), task = this.writeQueue.then(async () => { if (!this.port?.writable) throw new Error('The controller serial port is not writable.'); const writer = this.port.writable.getWriter(); this.writer = writer; try { if (message.type !== 'keepalive') this.log('debug', 'tx', { type: message.type, requestId: message.requestId, bytes: wire.length, attempt }); await writer.write(wire); } finally { writer.releaseLock(); if (this.writer === writer) this.writer = null; } }); this.writeQueue = task.catch(() => undefined); return task; }
+  private waitForAck(id: number, timeoutMs: number): Promise<DeviceMessage> { return new Promise((resolve, reject) => { const timeout = window.setTimeout(() => { this.pending.delete(id); reject(new Error(`Controller acknowledgement timed out for ${id}.`)); }, timeoutMs); this.pending.set(id, { resolve: (message) => { window.clearTimeout(timeout); resolve(message); }, reject: (error) => { window.clearTimeout(timeout); reject(error); } }); }); }
   private startReading(): void { if (!this.port?.readable || this.readLoopTask) return; this.readLoopTask = this.readMessages(this.port.readable).finally(() => { this.readLoopTask = null; }); }
-  private async readMessages(readable: ReadableStream<Uint8Array>): Promise<void> {
-    this.reader = readable.getReader(); const decoder = new TextDecoder();
-    try { while (true) { const { value, done } = await this.reader.read(); if (done) break; this.lineBuffer += decoder.decode(value, { stream: true }); const lines = this.lineBuffer.split('\n'); this.lineBuffer = lines.pop() ?? ''; lines.map((line) => line.trim()).filter(Boolean).forEach((line) => this.handleLine(line)); } }
-    catch (error) { if (this.currentStatus.state !== 'disconnected') this.setStatus({ state: 'error', message: error instanceof Error ? error.message : 'Serial communication error' }); }
-    finally { this.reader.releaseLock(); this.reader = null; if (this.currentStatus.state !== 'disconnected') this.setStatus({ state: 'disconnected', message: 'Controller connection lost' }); }
-  }
-  private handleLine(line: string): void {
-    const message = this.parseMessage(line);
-    if (!message) { this.setStatus({ ...this.currentStatus, message: 'Controller warning: malformed JSON ignored', warning: true }); return; }
-    if (message.version !== PROTOCOL_VERSION) { this.setStatus({ ...this.currentStatus, message: `Incompatible controller protocol (expected v${PROTOCOL_VERSION})`, warning: true }); return; }
-    if (message.type === 'ack' && typeof message.requestId === 'string') { const waiter = this.pending.get(message.requestId); if (waiter) { this.pending.delete(message.requestId); waiter.resolve(message); if (this.currentStatus.state === 'connected' && this.currentStatus.warning) this.setStatus({ ...this.currentStatus, message: 'Controller ready', warning: false }); } }
-    if (message.type === 'error') { const waiter = typeof message.requestId === 'string' ? this.pending.get(message.requestId) : undefined; if (waiter && typeof message.requestId === 'string') { this.pending.delete(message.requestId); waiter.reject(new Error(typeof message.message === 'string' ? message.message : 'Controller rejected the command.')); } else this.setStatus({ ...this.currentStatus, message: typeof message.message === 'string' ? `Controller warning: ${message.message}` : 'Controller warning', warning: true }); }
-    if (message.type === 'ready') this.handleReady(message as ReadyMessage);
-    this.messageListeners.forEach((listener) => listener(message));
-  }
-  private parseMessage(line: string): DeviceMessage | null {
-    // A controller reset can interrupt one response and append its boot-ready message
-    // to that unfinished line. Work backwards so the newest complete frame survives.
-    for (let start = line.lastIndexOf('{'); start >= 0;) {
-      try {
-        const value: unknown = JSON.parse(line.slice(start));
-        if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as DeviceMessage;
-      } catch { /* Try an earlier object boundary. */ }
-      if (start === 0) break;
-      start = line.lastIndexOf('{', start - 1);
-    }
-    return null;
-  }
-  private handleReady(message: ReadyMessage): void {
-    const firmware = typeof message.firmware === 'string' ? message.firmware : undefined; const ledCount = typeof message.ledCount === 'number' ? message.ledCount : undefined; const capabilities = Array.isArray(message.capabilities) ? message.capabilities.filter((item): item is string => typeof item === 'string') : [];
-    this.currentStatus = { ...this.currentStatus, firmware, ledCount, capabilities, message: 'Controller ready', warning: false };
-    const requestMatchesHandshake = typeof message.requestId === 'string';
-    if (requestMatchesHandshake) {
-      this.readyResolver?.(); this.readyResolver = null; this.readyRejecter = null;
-      this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount, capabilities }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message));
-    } else if (this.currentStatus.state === 'connected') {
-      this.setStatus({ state: 'connecting', message: 'Controller restarted; reconnecting', firmware, ledCount, capabilities }); void this.waitForReady().catch(() => undefined);
-    }
-  }
-  private waitForReady(): Promise<void> { return new Promise((resolve, reject) => { this.readyResolver = resolve; this.readyRejecter = reject; const deadline = Date.now() + 8000; const sendHello = () => { if (!this.readyResolver) return; if (Date.now() >= deadline) { this.readyResolver = null; this.readyRejecter = null; reject(new Error('Timed out waiting for the controller ready message.')); return; } void this.write({ version: PROTOCOL_VERSION, requestId: requestId(), type: 'hello', sessionId: this.sessionId }).catch(() => undefined); this.readyTimer = window.setTimeout(sendHello, 250); }; sendHello(); }); }
+  private async readMessages(readable: ReadableStream<Uint8Array>): Promise<void> { this.reader = readable.getReader(); try { while (true) { const { value, done } = await this.reader.read(); if (done) break; for (const byte of value) { if (!byte) { if (this.frameBuffer.length) this.handleEncodedFrame(Uint8Array.from(this.frameBuffer)); this.frameBuffer = []; } else if (this.frameBuffer.length < MAX_WIRE_FRAME) this.frameBuffer.push(byte); else { this.frameBuffer = []; this.warnMalformed('oversize frame'); } } } } catch (error) { if (this.currentStatus.state !== 'disconnected') this.setStatus({ state: 'error', message: error instanceof Error ? error.message : 'Serial communication error' }); } finally { this.reader.releaseLock(); this.reader = null; if (this.currentStatus.state !== 'disconnected') this.setStatus({ state: 'disconnected', message: 'Controller connection lost' }); } }
+  private handleEncodedFrame(encoded: Uint8Array): void { let message: DeviceMessage | null = null; for (let start = 0; start < encoded.length; start++) { const candidate = decodeWireMessage(encoded.subarray(start)); if (candidate) message = candidate; } if (!message) { this.warnMalformed('CRC, framing, or protocol mismatch'); return; } if (message.type !== 'ack' || debugEnabled()) this.log('debug', 'rx', { type: message.type, requestId: message.requestId, bytes: encoded.length + 1 }); if (message.type === 'ack' && message.requestId) { const waiter = this.pending.get(message.requestId); if (waiter) { this.pending.delete(message.requestId); waiter.resolve(message); if (this.currentStatus.state === 'connected' && this.currentStatus.warning) this.setStatus({ ...this.currentStatus, message: 'Controller ready', warning: false }); } } if (message.type === 'error') { const waiter = message.requestId ? this.pending.get(message.requestId) : undefined, error = new Error(typeof message.message === 'string' ? message.message : 'Controller rejected the command.'); if (waiter && message.requestId) { this.pending.delete(message.requestId); waiter.reject(error); } else this.setStatus({ ...this.currentStatus, message: `Controller warning: ${error.message}`, warning: true }); } if (message.type === 'ready') this.handleReady(message as ReadyMessage); this.messageListeners.forEach((listener) => listener(message as DeviceMessage)); }
+  private warnMalformed(reason: string): void { this.log('warn', 'invalid rx frame', { reason }); this.setStatus({ ...this.currentStatus, message: `Controller warning: ${reason}`, warning: true }); }
+  private handleReady(message: ReadyMessage): void { const firmware = typeof message.firmware === 'string' ? message.firmware : undefined, ledCount = typeof message.ledCount === 'number' ? message.ledCount : undefined, capabilities = Array.isArray(message.capabilities) ? message.capabilities.filter((item): item is string => typeof item === 'string') : []; this.currentStatus = { ...this.currentStatus, firmware, ledCount, capabilities, message: 'Controller ready', warning: false }; if (message.requestId) { this.readyResolver?.(); this.readyResolver = null; this.readyRejecter = null; this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount, capabilities }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message)); this.log('info', 'handshake complete', { firmware, ledCount, capabilities }); } else if (this.currentStatus.state === 'connected') { this.log('warn', 'controller restarted; re-handshaking'); this.setStatus({ state: 'connecting', message: 'Controller restarted; reconnecting', firmware, ledCount, capabilities }); void this.waitForReady().catch((error) => this.log('error', 're-handshake failed', { message: error instanceof Error ? error.message : String(error) })); } }
+  private waitForReady(): Promise<void> { return new Promise((resolve, reject) => { this.readyResolver = resolve; this.readyRejecter = reject; const deadline = Date.now() + 8000, sendHello = () => { if (!this.readyResolver) return; if (Date.now() >= deadline) { this.readyResolver = null; this.readyRejecter = null; reject(new Error('Timed out waiting for the controller ready frame.')); return; } void this.write({ version: PROTOCOL_VERSION, requestId: randomId(), type: 'hello', sessionId: this.sessionId }).catch((error) => this.log('warn', 'hello write failed', { message: error instanceof Error ? error.message : String(error) })); this.readyTimer = window.setTimeout(sendHello, 250); }; sendHello(); }); }
   private startKeepalive(): void { if (this.keepaliveTimer) window.clearInterval(this.keepaliveTimer); this.keepaliveTimer = window.setInterval(() => { if (this.currentStatus.state === 'connected') void this.sendRequest({ type: 'keepalive', sessionId: this.sessionId }, 1).catch(() => undefined); }, 1000); }
-  private async closePort(): Promise<void> { if (this.readyTimer) window.clearTimeout(this.readyTimer); this.readyTimer = undefined; if (this.keepaliveTimer) window.clearInterval(this.keepaliveTimer); this.keepaliveTimer = undefined; this.readyRejecter?.(new Error('Serial connection closed.')); this.readyResolver = null; this.readyRejecter = null; this.pending.forEach(({ reject }) => reject(new Error('Serial connection closed.'))); this.pending.clear(); if (this.reader) await this.reader.cancel().catch(() => undefined); if (this.readLoopTask) await this.readLoopTask.catch(() => undefined); if (this.writer) this.writer.releaseLock(); this.writer = null; if (this.port) await this.port.close().catch(() => undefined); this.port = null; this.lineBuffer = ''; this.outputPending = null; }
+  private async closePort(): Promise<void> { if (this.readyTimer) window.clearTimeout(this.readyTimer); this.readyTimer = undefined; if (this.keepaliveTimer) window.clearInterval(this.keepaliveTimer); this.keepaliveTimer = undefined; this.readyRejecter?.(new Error('Serial connection closed.')); this.readyResolver = null; this.readyRejecter = null; this.pending.forEach(({ reject }) => reject(new Error('Serial connection closed.'))); this.pending.clear(); if (this.reader) await this.reader.cancel().catch(() => undefined); if (this.readLoopTask) await this.readLoopTask.catch(() => undefined); if (this.writer) this.writer.releaseLock(); this.writer = null; if (this.port) await this.port.close().catch(() => undefined); this.port = null; this.frameBuffer = []; this.outputPending = null; }
   private setStatus(status: SerialStatus): void { this.currentStatus = status; this.listeners.forEach((listener) => listener(status)); }
+  private log(level: 'debug' | 'info' | 'warn' | 'error', event: string, details?: unknown): void { if (level === 'debug' && !debugEnabled()) return; const method = console[level] ?? console.log; if (details === undefined) method(`[TimeLight serial] ${event}`); else method(`[TimeLight serial] ${event}`, details); }
 }
