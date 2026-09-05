@@ -200,7 +200,7 @@ body.live-open { overflow: hidden; }
   .editor-footer { padding-top: 14px; }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 720px) {
   .page-shell { width: min(100% - 12px, 1160px); }
   .topbar { padding: 10px 0; }
   .title-block { align-items: flex-start; flex-direction: column; gap: 9px; }
@@ -297,13 +297,13 @@ body.live-open { overflow: hidden; }
 }
 
 /* Let the editor scroll when compact screens cannot show the full stage list. */
-@media (max-height: 600px), (max-width: 620px) {
+@media (max-height: 600px), (max-width: 720px) {
   .overview-canvas { display: block; overflow-y: auto; }
   .overview-layout { width: 100%; flex: none; grid-template-rows: auto auto; align-content: start; }
   .stage-overview { min-height: 0; }
   .stage-list { flex: 0 0 auto; overflow-y: visible; scrollbar-gutter: auto; }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 720px) {
   .stage-row { padding: 0; }
 }

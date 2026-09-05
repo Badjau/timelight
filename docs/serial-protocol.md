@@ -1,4 +1,4 @@
-# TimeLight serial protocol v2
+# TimeLight serial protocol v3
 
 The website is authoritative for presets, elapsed time, stages, timer state, and control decisions. The Arduino is a low-latency output renderer and button reporter. It never receives a preset, threshold, elapsed time, or start/pause/advance command.
 
@@ -9,11 +9,11 @@ Messages are newline-delimited UTF-8 JSON over 115200 baud, 8 data bits, no pari
 The browser sends `hello` repeatedly every 250 ms for up to eight seconds after opening a port. This handles Nano auto-reset without requiring the browser to catch the one boot message. A hello establishes the browser session; the Arduino responds to every hello with `ready`.
 
 ```json
-{"version":2,"requestId":"...","type":"hello","sessionId":"browser-session-id"}
+{"version":3,"requestId":"...","type":"hello","sessionId":"browser-session-id"}
 ```
 
 ```json
-{"version":2,"type":"ready","requestId":"...","device":"timelight-arduino","firmware":"0.2.0","ledCount":116,"buttons":["play_pause","next_stage"]}
+{"version":3,"type":"ready","requestId":"...","device":"timelight-arduino","firmware":"0.3.0","ledCount":116,"buttons":["play_pause","next_stage"]}
 ```
 
 The Arduino also emits `ready` after boot. A ready message received on an already-open port causes the browser to repeat the handshake and resend its current output snapshot. It does not replay old timer transitions or chimes.
@@ -21,25 +21,27 @@ The Arduino also emits `ready` after boot. A ready message received on an alread
 `ping` produces `pong`. `keepalive` is sent once per second while connected and renews a repeating-buzzer lease. Commands that have a `requestId` are acknowledged as follows:
 
 ```json
-{"version":2,"type":"ack","requestId":"...","appliedRevision":12}
+{"version":3,"type":"ack","requestId":"...","appliedRevision":12}
 ```
 
-The browser waits 500 ms and retries twice. The Arduino treats malformed or oversized lines as recoverable errors and continues its output and button loops. A v1 command receives a clear unsupported-protocol error.
+The browser waits 500 ms and retries twice. The Arduino treats malformed or oversized lines as recoverable errors and continues its output and button loops. v2 and v1 commands receive a clear unsupported-protocol error; v2 clients/controllers are explicitly incompatible with v3.
 
 ## Website to Arduino
 
 `set_outputs` is a complete declarative snapshot. Newer revisions supersede older revisions; duplicate or stale revisions are acknowledged without being applied.
 
 ```json
-{"version":2,"requestId":"...","type":"set_outputs","sessionId":"browser-session-id","revision":12,"color":"#ff0000","ledEffect":"blink","transitionMs":450,"buzzerMode":"repeat","leaseMs":3000}
+{"version":3,"requestId":"...","type":"set_outputs","sessionId":"browser-session-id","revision":12,"color":"#ff0000","ledEffect":"blink","transitionMs":1000,"animationState":"playing","buzzerMode":"repeat","leaseMs":3000}
 ```
 
-`ledEffect` is `off`, `solid`, or `blink`. `buzzerMode` is `none` or `repeat`. `leaseMs` is at most 3000 and is renewed by keepalive. If the lease expires, repeating audio is silenced while the last LED state remains.
+`ledEffect` is `off`, `solid`, or `blink`. `animationState` is `playing` or `paused`; it controls whether transition and breathing progress advances. `transitionMs` is the duration for adopting a newly commanded target: the website uses 300 ms at start, 1000 ms at stage entry, and 0 ms for state-only synchronization or reconnect. A blinking target reaches full color before its 700 ms fade-out and 700 ms fade-in breathing cycle begins. `buzzerMode` is `none` or `repeat`. `leaseMs` is at most 3000 and is renewed by keepalive. If the lease expires, repeating audio is silenced while the last LED state remains.
+
+The Arduino freezes the exact rendered frame when `animationState` is `paused`. A resume snapshot with `transitionMs: 0` retains the transition/blink progress. A new target starts a transition from the currently displayed frame. `ledEffect: "off"` immediately clears all animation state. Duplicate or stale revisions are acknowledged without restarting animation, including retried commands.
 
 Stage-entry one-shot alerts use a session-scoped event ID. The Arduino deduplicates recent event IDs, making retries safe:
 
 ```json
-{"version":2,"requestId":"...","type":"buzz_once","sessionId":"browser-session-id","eventId":"run-id:stage-index"}
+{"version":3,"requestId":"...","type":"buzz_once","sessionId":"browser-session-id","eventId":"run-id:stage-index"}
 ```
 
 ## Arduino to website
@@ -47,7 +49,7 @@ Stage-entry one-shot alerts use a session-scoped event ID. The Arduino deduplica
 Debounced buttons are reported only after a browser session has been established:
 
 ```json
-{"version":2,"type":"button","button":"play_pause","sequence":42}
+{"version":3,"type":"button","button":"play_pause","sequence":42}
 ```
 
 `button` is `play_pause` or `next_stage`. The sequence is monotonic for the current MCU boot and the website deduplicates already-seen sequences before routing the event through the same reducer action as an on-screen control.

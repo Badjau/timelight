@@ -9,10 +9,11 @@
 #define PLAY_PAUSE_BUTTON_PIN 4
 #define NEXT_STAGE_BUTTON_PIN 5
 #define BAUD_RATE 115200
-#define PROTOCOL_VERSION 2
+#define PROTOCOL_VERSION 3
 #define RX_BUFFER_SIZE 384
 #define BUTTON_DEBOUNCE_MS 35
-#define BLINK_INTERVAL_MS 700
+#define BLINK_FADE_MS 700
+#define LED_FRAME_INTERVAL_MS 16
 #define BUZZER_INTERVAL_MS 1500
 #define BUZZER_DURATION_MS 75
 
@@ -27,16 +28,18 @@ uint32_t desiredColor = 0;
 uint32_t displayedColor = 0;
 uint32_t transitionStartColor = 0;
 uint32_t transitionTargetColor = 0;
-uint32_t transitionStartedMillis = 0;
+uint32_t transitionElapsed = 0;
 uint16_t transitionDuration = 0;
+uint32_t blinkElapsed = 0;
+uint32_t lastAnimationMillis = 0;
+uint32_t lastLedFrameMillis = 0;
 LedEffect ledEffect = EFFECT_OFF;
+bool animationPlaying = false;
 BuzzerMode buzzerMode = BUZZER_NONE;
 uint32_t audibleLeaseExpires = 0;
 uint32_t nextBuzzerMillis = 0;
 uint32_t appliedRevision = 0;
 uint32_t buttonSequence = 0;
-uint32_t lastBlinkMillis = 0;
-bool blinkOn = true;
 char browserSession[41] = "";
 char buzzEvents[8][41] = {};
 uint8_t buzzEventCount = 0;
@@ -84,23 +87,32 @@ bool readRequestId(Span object, char* output, size_t size) { return readText(obj
 bool sessionMatches(Span object) { char session[41]; return readText(object, "sessionId", session, sizeof(session)) && browserSession[0] && strcmp(session, browserSession) == 0; }
 
 void printJsonString(const char* value) { Serial.print('"'); while (*value) { if (*value == '"' || *value == '\\') Serial.print('\\'); Serial.print(*value++); } Serial.print('"'); }
-void sendError(const char* message, const char* requestId = nullptr) { Serial.print(F("{\"version\":2,\"type\":\"error\"")); if (requestId && requestId[0]) { Serial.print(F(",\"requestId\":")); printJsonString(requestId); } Serial.print(F(",\"message\":")); printJsonString(message); Serial.println('}'); }
-void sendAck(const char* requestId, uint32_t revision) { Serial.print(F("{\"version\":2,\"type\":\"ack\",\"requestId\":")); printJsonString(requestId); Serial.print(F(",\"appliedRevision\":")); Serial.print(revision); Serial.println('}'); }
-void sendReady(const char* requestId = nullptr) { Serial.print(F("{\"version\":2,\"type\":\"ready\"")); if (requestId && requestId[0]) { Serial.print(F(",\"requestId\":")); printJsonString(requestId); } Serial.print(F(",\"device\":\"timelight-arduino\",\"firmware\":\"0.2.0\",\"ledCount\":")); Serial.print(LED_COUNT); Serial.println(F(",\"buttons\":[\"play_pause\",\"next_stage\"]}")); }
-void sendPong(const char* requestId) { Serial.print(F("{\"version\":2,\"type\":\"pong\",\"requestId\":")); printJsonString(requestId); Serial.println('}'); }
+void sendError(const char* message, const char* requestId = nullptr) { Serial.print(F("{\"version\":3,\"type\":\"error\"")); if (requestId && requestId[0]) { Serial.print(F(",\"requestId\":")); printJsonString(requestId); } Serial.print(F(",\"message\":")); printJsonString(message); Serial.println('}'); }
+void sendAck(const char* requestId, uint32_t revision) { Serial.print(F("{\"version\":3,\"type\":\"ack\",\"requestId\":")); printJsonString(requestId); Serial.print(F(",\"appliedRevision\":")); Serial.print(revision); Serial.println('}'); }
+void sendReady(const char* requestId = nullptr) { Serial.print(F("{\"version\":3,\"type\":\"ready\"")); if (requestId && requestId[0]) { Serial.print(F(",\"requestId\":")); printJsonString(requestId); } Serial.print(F(",\"device\":\"timelight-arduino\",\"firmware\":\"0.3.0\",\"ledCount\":")); Serial.print(LED_COUNT); Serial.println(F(",\"buttons\":[\"play_pause\",\"next_stage\"]}")); }
+void sendPong(const char* requestId) { Serial.print(F("{\"version\":3,\"type\":\"pong\",\"requestId\":")); printJsonString(requestId); Serial.println('}'); }
 
-uint32_t colorForPixels(uint32_t color) { return color; }
-void setStripColor(uint32_t color) { uint32_t value = pixel.Color((color >> 16) & 255, (color >> 8) & 255, color & 255); for (uint16_t i = 0; i < LED_COUNT; i++) pixel.setPixelColor(i, value); pixel.show(); displayedColor = color; }
-uint8_t blend(uint8_t from, uint8_t to, uint32_t elapsed, uint16_t duration) { if (!duration || elapsed >= duration) return to; return from + ((int32_t)((int16_t)to - (int16_t)from) * elapsed) / duration; }
+void setStripColor(uint32_t color) { uint32_t value = pixel.Color((color >> 16) & 255, (color >> 8) & 255, color & 255); for (uint16_t i = 0; i < LED_COUNT; i++) pixel.setPixelColor(i, value); pixel.show(); displayedColor = color; lastLedFrameMillis = millis(); }
+uint8_t blend(uint8_t from, uint8_t to, uint32_t elapsed, uint16_t duration) { if (!duration || elapsed >= duration) return to; int32_t difference = (int32_t)to - (int32_t)from; return (uint8_t)((int32_t)from + difference * (int32_t)elapsed / (int32_t)duration); }
+uint32_t scaleColor(uint32_t color, uint8_t brightness) { return ((uint32_t)((color >> 16 & 255) * brightness / 255) << 16) | ((uint32_t)((color >> 8 & 255) * brightness / 255) << 8) | ((color & 255) * brightness / 255); }
+uint32_t transitionColor() { return ((uint32_t)blend((transitionStartColor >> 16) & 255, (transitionTargetColor >> 16) & 255, transitionElapsed, transitionDuration) << 16) | ((uint32_t)blend((transitionStartColor >> 8) & 255, (transitionTargetColor >> 8) & 255, transitionElapsed, transitionDuration) << 8) | blend(transitionStartColor & 255, transitionTargetColor & 255, transitionElapsed, transitionDuration); }
+uint32_t renderedColor() {
+  uint32_t color = transitionDuration && transitionElapsed < transitionDuration ? transitionColor() : desiredColor;
+  if (ledEffect == EFFECT_OFF) return 0;
+  if (ledEffect == EFFECT_BLINK && (!transitionDuration || transitionElapsed >= transitionDuration)) { uint32_t phase = blinkElapsed; uint8_t brightness = phase < BLINK_FADE_MS ? 255 - (phase * 255 / BLINK_FADE_MS) : ((phase - BLINK_FADE_MS) * 255 / BLINK_FADE_MS); return scaleColor(desiredColor, brightness); }
+  return color;
+}
 void updateLeds() {
-  uint32_t now = millis(); uint32_t color = desiredColor;
-  if (transitionDuration && now - transitionStartedMillis < transitionDuration) { uint32_t elapsed = now - transitionStartedMillis; color = ((uint32_t)blend((transitionStartColor >> 16) & 255, (desiredColor >> 16) & 255, elapsed, transitionDuration) << 16) | ((uint32_t)blend((transitionStartColor >> 8) & 255, (desiredColor >> 8) & 255, elapsed, transitionDuration) << 8) | blend(transitionStartColor & 255, desiredColor & 255, elapsed, transitionDuration); }
-  else transitionDuration = 0;
-  if (ledEffect == EFFECT_OFF) color = 0;
-  if (ledEffect == EFFECT_BLINK) { if (now - lastBlinkMillis >= BLINK_INTERVAL_MS) { lastBlinkMillis = now; blinkOn = !blinkOn; } if (!blinkOn) color = 0; }
+  uint32_t now = millis(); uint32_t delta = now - lastAnimationMillis; lastAnimationMillis = now;
+  if (animationPlaying) {
+    if (transitionDuration && transitionElapsed < transitionDuration) { transitionElapsed = min((uint32_t)transitionDuration, transitionElapsed + delta); if (transitionElapsed >= transitionDuration) blinkElapsed = 0; }
+    else if (ledEffect == EFFECT_BLINK) blinkElapsed = (blinkElapsed + delta) % (BLINK_FADE_MS * 2UL);
+  }
+  uint32_t color = renderedColor();
+  if (now - lastLedFrameMillis < LED_FRAME_INTERVAL_MS) return;
   if (color != displayedColor) setStripColor(color);
 }
-void applyOutputs(uint32_t color, LedEffect effect, uint16_t transition, BuzzerMode buzzer, uint32_t lease) { transitionStartColor = displayedColor; desiredColor = color; ledEffect = effect; transitionDuration = transition; transitionStartedMillis = millis(); lastBlinkMillis = transitionStartedMillis; blinkOn = true; buzzerMode = buzzer; nextBuzzerMillis = 0; audibleLeaseExpires = buzzer == BUZZER_REPEAT && lease ? millis() + min(lease, (uint32_t)3000) : 0; if (buzzer != BUZZER_REPEAT) noTone(BUZZER_PIN); updateLeds(); }
+void applyOutputs(uint32_t color, LedEffect effect, uint16_t transition, bool playing, BuzzerMode buzzer, uint32_t lease) { uint32_t now = millis(); bool targetChanged = effect != ledEffect || color != desiredColor; if (effect == EFFECT_OFF) { desiredColor = 0; ledEffect = EFFECT_OFF; transitionDuration = 0; transitionElapsed = 0; blinkElapsed = 0; animationPlaying = false; setStripColor(0); } else { if (targetChanged) { transitionStartColor = renderedColor(); desiredColor = color; transitionTargetColor = color; transitionDuration = transition; transitionElapsed = 0; blinkElapsed = 0; } else { desiredColor = color; transitionTargetColor = color; } ledEffect = effect; animationPlaying = playing; } lastAnimationMillis = now; buzzerMode = buzzer; nextBuzzerMillis = 0; audibleLeaseExpires = buzzer == BUZZER_REPEAT && lease ? now + min(lease, (uint32_t)3000) : 0; if (buzzer != BUZZER_REPEAT) noTone(BUZZER_PIN); updateLeds(); }
 void updateBuzzer() { uint32_t now = millis(); if (buzzerMode != BUZZER_REPEAT || !audibleLeaseExpires || (int32_t)(now - audibleLeaseExpires) >= 0) { if (buzzerMode != BUZZER_REPEAT || (int32_t)(now - audibleLeaseExpires) >= 0) { noTone(BUZZER_PIN); buzzerMode = BUZZER_NONE; } return; } if (!nextBuzzerMillis || (int32_t)(now - nextBuzzerMillis) >= 0) { tone(BUZZER_PIN, 2400, BUZZER_DURATION_MS); nextBuzzerMillis = now + BUZZER_INTERVAL_MS; } }
 
 bool rememberBuzzEvent(const char* eventId) { for (uint8_t i = 0; i < buzzEventCount; i++) if (strcmp(buzzEvents[i], eventId) == 0) return false; if (buzzEventCount < 8) strcpy(buzzEvents[buzzEventCount++], eventId); else { for (uint8_t i = 1; i < 8; i++) strcpy(buzzEvents[i - 1], buzzEvents[i]); strcpy(buzzEvents[7], eventId); } return true; }
@@ -112,9 +124,9 @@ void handleMessage() {
   if (strcmp(type, "ping") == 0) { sendPong(requestId); sendAck(requestId, appliedRevision); return; }
   if (strcmp(type, "set_outputs") == 0) {
     if (!sessionMatches(message)) { sendError("Unknown browser session", requestId); return; }
-    uint32_t revision = 0, transition = 0, lease = 0, color = 0; char effect[10], buzzer[10]; if (!findKey(message, "revision", value) || !readUnsigned(value, revision) || !findKey(message, "color", value) || !readColor(value, color) || !readText(message, "ledEffect", effect, sizeof(effect)) || !findKey(message, "transitionMs", value) || !readUnsigned(value, transition) || transition > 5000 || !readText(message, "buzzerMode", buzzer, sizeof(buzzer)) || !findKey(message, "leaseMs", value) || !readUnsigned(value, lease) || lease > 3000) { sendError("Invalid output snapshot", requestId); return; }
-    LedEffect parsedEffect = strcmp(effect, "off") == 0 ? EFFECT_OFF : strcmp(effect, "solid") == 0 ? EFFECT_SOLID : strcmp(effect, "blink") == 0 ? EFFECT_BLINK : (LedEffect)255; BuzzerMode parsedBuzzer = strcmp(buzzer, "none") == 0 ? BUZZER_NONE : strcmp(buzzer, "repeat") == 0 ? BUZZER_REPEAT : (BuzzerMode)255; if (parsedEffect == (LedEffect)255 || parsedBuzzer == (BuzzerMode)255) { sendError("Invalid output effect", requestId); return; }
-    if (revision > appliedRevision) { appliedRevision = revision; applyOutputs(color, parsedEffect, transition, parsedBuzzer, lease); } sendAck(requestId, appliedRevision); return;
+    uint32_t revision = 0, transition = 0, lease = 0, color = 0; char effect[10], animation[10], buzzer[10]; if (!findKey(message, "revision", value) || !readUnsigned(value, revision) || !findKey(message, "color", value) || !readColor(value, color) || !readText(message, "ledEffect", effect, sizeof(effect)) || !findKey(message, "transitionMs", value) || !readUnsigned(value, transition) || transition > 5000 || !readText(message, "animationState", animation, sizeof(animation)) || !readText(message, "buzzerMode", buzzer, sizeof(buzzer)) || !findKey(message, "leaseMs", value) || !readUnsigned(value, lease) || lease > 3000) { sendError("Invalid output snapshot", requestId); return; }
+    LedEffect parsedEffect = strcmp(effect, "off") == 0 ? EFFECT_OFF : strcmp(effect, "solid") == 0 ? EFFECT_SOLID : strcmp(effect, "blink") == 0 ? EFFECT_BLINK : (LedEffect)255; BuzzerMode parsedBuzzer = strcmp(buzzer, "none") == 0 ? BUZZER_NONE : strcmp(buzzer, "repeat") == 0 ? BUZZER_REPEAT : (BuzzerMode)255; if (parsedEffect == (LedEffect)255 || parsedBuzzer == (BuzzerMode)255 || (strcmp(animation, "playing") != 0 && strcmp(animation, "paused") != 0)) { sendError("Invalid output effect or animation state", requestId); return; }
+    if (revision > appliedRevision) { appliedRevision = revision; applyOutputs(color, parsedEffect, transition, strcmp(animation, "playing") == 0, parsedBuzzer, lease); } sendAck(requestId, appliedRevision); return;
   }
   if (strcmp(type, "buzz_once") == 0) { if (!sessionMatches(message)) { sendError("Unknown browser session", requestId); return; } char eventId[41]; if (!readText(message, "eventId", eventId, sizeof(eventId))) { sendError("Invalid buzzer event", requestId); return; } if (rememberBuzzEvent(eventId)) tone(BUZZER_PIN, 2400, BUZZER_DURATION_MS); sendAck(requestId, appliedRevision); return; }
   if (strcmp(type, "keepalive") == 0) { if (!sessionMatches(message)) { sendError("Unknown browser session", requestId); return; } if (buzzerMode == BUZZER_REPEAT) audibleLeaseExpires = millis() + 3000; sendAck(requestId, appliedRevision); return; }
@@ -123,7 +135,7 @@ void handleMessage() {
 
 void readSerial() { while (Serial.available() > 0) { char c = (char)Serial.read(); if (c == '\r') continue; if (c == '\n') { if (inputOverflow) sendError("Message too long"); else if (inputLength) handleMessage(); inputLength = 0; inputOverflow = false; continue; } if (inputLength + 1 >= RX_BUFFER_SIZE) { inputOverflow = true; continue; } inputBuffer[inputLength++] = c; } }
 bool buttonPressed(ButtonState& button) { bool reading = digitalRead(button.pin); uint32_t now = millis(); if (reading != button.lastReading) { button.lastDebounceMillis = now; button.lastReading = reading; } if (now - button.lastDebounceMillis < BUTTON_DEBOUNCE_MS || reading == button.stableReading) return false; button.stableReading = reading; return reading == LOW; }
-void sendButton(const char* name) { Serial.print(F("{\"version\":2,\"type\":\"button\",\"button\":")); printJsonString(name); Serial.print(F(",\"sequence\":")); Serial.print(++buttonSequence); Serial.println('}'); }
+void sendButton(const char* name) { Serial.print(F("{\"version\":3,\"type\":\"button\",\"button\":")); printJsonString(name); Serial.print(F(",\"sequence\":")); Serial.print(++buttonSequence); Serial.println('}'); }
 void handleButtons() { if (!browserSession[0]) return; if (buttonPressed(playPauseButton)) sendButton("play_pause"); if (buttonPressed(nextStageButton)) sendButton("next_stage"); }
 
 void setup() { pinMode(BUZZER_PIN, OUTPUT); digitalWrite(BUZZER_PIN, LOW); pinMode(PLAY_PAUSE_BUTTON_PIN, INPUT_PULLUP); pinMode(NEXT_STAGE_BUTTON_PIN, INPUT_PULLUP); playPauseButton.lastReading = playPauseButton.stableReading = digitalRead(PLAY_PAUSE_BUTTON_PIN); nextStageButton.lastReading = nextStageButton.stableReading = digitalRead(NEXT_STAGE_BUTTON_PIN); pixel.begin(); pixel.setBrightness(80); pixel.clear(); pixel.show(); Serial.begin(BAUD_RATE); delay(50); sendReady(); }

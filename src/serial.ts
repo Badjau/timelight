@@ -1,11 +1,11 @@
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const DEFAULT_BAUD_RATE = 115200;
 export const OUTPUT_LEASE_MS = 3000;
 
 export type SerialConnectionState = 'unsupported' | 'disconnected' | 'connecting' | 'connected' | 'error';
 export type LedEffect = 'off' | 'solid' | 'blink';
 export type BuzzerMode = 'none' | 'repeat';
-export type OutputSnapshot = { revision: number; color: string; ledEffect: LedEffect; transitionMs: number; buzzerMode: BuzzerMode };
+export type OutputSnapshot = { revision: number; color: string; ledEffect: LedEffect; transitionMs: number; animationState: 'playing' | 'paused'; buzzerMode: BuzzerMode };
 export type DeviceMessage = { version?: number; type?: string; [key: string]: unknown };
 export type ReadyMessage = DeviceMessage & { type: 'ready'; firmware?: string; ledCount?: number; buttons?: string[]; requestId?: string };
 export type ButtonMessage = DeviceMessage & { type: 'button'; button?: string; sequence?: number };
@@ -15,7 +15,7 @@ export interface SerialPortLike { readable: ReadableStream<Uint8Array> | null; w
 export interface SerialLike { requestPort(): Promise<SerialPortLike>; getPorts(): Promise<SerialPortLike[]> }
 declare global { interface Navigator { serial?: SerialLike } }
 function serialApi(): SerialLike | undefined { return typeof navigator === 'undefined' ? undefined : navigator.serial; }
-function requestId(): string { return crypto.randomUUID(); }
+function requestId(): string { return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 type PendingAck = { resolve: (message: DeviceMessage) => void; reject: (error: Error) => void };
 
 export class ArduinoSerial {
@@ -60,7 +60,7 @@ export class ArduinoSerial {
   async setOutputs(snapshot: OutputSnapshot): Promise<void> {
     this.outputPending = snapshot;
     if (!this.outputTask) {
-      this.outputTask = (async () => { try { while (this.outputPending) { const next = this.outputPending; this.outputPending = null; await this.sendRequest({ type: 'set_outputs', sessionId: this.sessionId, revision: next.revision, color: next.color, ledEffect: next.ledEffect, transitionMs: next.transitionMs, buzzerMode: next.buzzerMode, leaseMs: next.buzzerMode === 'repeat' ? OUTPUT_LEASE_MS : 0 }); } } finally { this.outputTask = null; } })();
+      this.outputTask = (async () => { try { while (this.outputPending) { const next = this.outputPending; this.outputPending = null; await this.sendRequest({ type: 'set_outputs', sessionId: this.sessionId, revision: next.revision, color: next.color, ledEffect: next.ledEffect, transitionMs: next.transitionMs, animationState: next.animationState, buzzerMode: next.buzzerMode, leaseMs: next.buzzerMode === 'repeat' ? OUTPUT_LEASE_MS : 0 }); } } finally { this.outputTask = null; } })();
     }
     return this.outputTask;
   }
@@ -112,9 +112,13 @@ export class ArduinoSerial {
   private handleReady(message: ReadyMessage): void {
     const firmware = typeof message.firmware === 'string' ? message.firmware : undefined; const ledCount = typeof message.ledCount === 'number' ? message.ledCount : undefined;
     this.currentStatus = { ...this.currentStatus, firmware, ledCount, message: 'Controller ready', warning: false };
-    const requestMatchesHandshake = typeof message.requestId === 'string'; this.readyResolver?.(); this.readyResolver = null; this.readyRejecter = null;
-    if (requestMatchesHandshake || this.currentStatus.state !== 'connected') { this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message)); }
-    else { this.setStatus({ state: 'connecting', message: 'Controller restarted; reconnecting' }); void this.waitForReady().then(() => { this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message)); }).catch(() => undefined); }
+    const requestMatchesHandshake = typeof message.requestId === 'string';
+    if (requestMatchesHandshake) {
+      this.readyResolver?.(); this.readyResolver = null; this.readyRejecter = null;
+      this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message));
+    } else if (this.currentStatus.state === 'connected') {
+      this.setStatus({ state: 'connecting', message: 'Controller restarted; reconnecting' }); void this.waitForReady().then(() => { this.setStatus({ state: 'connected', message: 'Controller ready', firmware, ledCount }); this.startKeepalive(); this.readyListeners.forEach((listener) => listener(message)); }).catch(() => undefined);
+    }
   }
   private waitForReady(): Promise<void> { return new Promise((resolve, reject) => { this.readyResolver = resolve; this.readyRejecter = reject; const deadline = Date.now() + 8000; const sendHello = () => { if (!this.readyResolver) return; if (Date.now() >= deadline) { this.readyResolver = null; this.readyRejecter = null; reject(new Error('Timed out waiting for the controller ready message.')); return; } void this.write({ version: PROTOCOL_VERSION, requestId: requestId(), type: 'hello', sessionId: this.sessionId }).catch(() => undefined); this.readyTimer = window.setTimeout(sendHello, 250); }; sendHello(); }); }
   private startKeepalive(): void { if (this.keepaliveTimer) window.clearInterval(this.keepaliveTimer); this.keepaliveTimer = window.setInterval(() => { if (this.currentStatus.state === 'connected') void this.sendRequest({ type: 'keepalive', sessionId: this.sessionId }, 1).catch(() => undefined); }, 1000); }

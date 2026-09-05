@@ -44,6 +44,7 @@ export type HardwareOutputs = {
   color: string;
   ledEffect: 'off' | 'solid' | 'blink';
   transitionMs: number;
+  animationState: 'playing' | 'paused';
   buzzerMode: 'none' | 'repeat';
 };
 
@@ -70,9 +71,11 @@ function clonePreset(preset: PresetSnapshot): PresetSnapshot {
   return structuredClone(preset);
 }
 
+function newId(): string { return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+
 function nextRun(preset: PresetSnapshot, clock: TimerClock): TimerRun {
   return {
-    preset: clonePreset(preset), runId: crypto.randomUUID(), state: 'running', accumulatedElapsed: 0, lastPersistedElapsed: 0,
+    preset: clonePreset(preset), runId: newId(), state: 'running', accumulatedElapsed: 0, lastPersistedElapsed: 0,
     startedAtWallMs: clock.wallMs, lastPersistedWallMs: clock.wallMs, manualStageIndex: null, lastEffectiveStageIndex: 0,
     startedAtMonotonicMs: clock.monotonicMs,
   };
@@ -108,13 +111,14 @@ export function reduceTimer(previous: TimerRun | null, action: TimerAction, cloc
 }
 
 export function deriveOutputs(run: TimerRun | null, clock: TimerClock): HardwareOutputs {
-  if (!run) return { color: '#000000', ledEffect: 'off', transitionMs: 0, buzzerMode: 'none' };
+  if (!run) return { color: '#000000', ledEffect: 'off', transitionMs: 0, animationState: 'paused', buzzerMode: 'none' };
   const stage = run.preset.stages[effectiveStage(run, clock)] ?? run.preset.stages[0];
-  if (!stage) return { color: '#000000', ledEffect: 'off', transitionMs: 0, buzzerMode: 'none' };
+  if (!stage) return { color: '#000000', ledEffect: 'off', transitionMs: 0, animationState: 'paused', buzzerMode: 'none' };
   return {
     color: stage.color,
-    ledEffect: run.state === 'running' ? (stage.blink ? 'blink' : 'solid') : 'solid',
-    transitionMs: run.state === 'running' ? 450 : 0,
+    ledEffect: stage.blink ? 'blink' : 'solid',
+    transitionMs: 0,
+    animationState: run.state === 'running' ? 'playing' : 'paused',
     buzzerMode: run.state === 'running' && stage.buzzer === 'repeat' ? 'repeat' : 'none',
   };
 }
