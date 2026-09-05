@@ -142,6 +142,8 @@ body.live-open { overflow: hidden; }
 .stage-progress-item b { color: #b5c8dc; font-size: .84rem; }
 .stage-progress-item small { margin-top: 5px; color: #61758e; font-size: .78rem; }
 .timer-note { margin-top: 36px; color: #8097b0; font-size: 1.05rem; }
+.timer-warnings { display: grid; gap: 7px; margin-top: 18px; }
+.timer-warning { padding: 9px 11px; border: 1px solid rgba(255, 209, 102, .35); border-radius: 7px; background: rgba(122, 85, 18, .2); color: #ffd98a; font-size: .8rem; line-height: 1.35; }
 .controller-zone { margin-top: 42px; }
 .controller-strip { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 10px 13px; padding-top: 17px; border-top: 1px solid rgba(169, 194, 225, .1); color: #61758e; font-size: .72rem; }
 .title-block > .controller-strip { padding-top: 0; border-top: 0; }

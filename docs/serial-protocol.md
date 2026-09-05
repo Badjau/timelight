@@ -1,63 +1,59 @@
-# TimeLight serial protocol
+# TimeLight serial protocol v2
 
-The PWA communicates with the Arduino over a USB virtual serial port using **115200 baud, 8 data bits, no parity, and 1 stop bit**. The current hardware has a WS2812 strip on D6, a buzzer on D7, a play/pause button on D4, and a next-stage button on D5. Every message is one UTF-8 JSON object followed by `\n`. The protocol version is currently `1`.
+The website is authoritative for presets, elapsed time, stages, timer state, and control decisions. The Arduino is a low-latency output renderer and button reporter. It never receives a preset, threshold, elapsed time, or start/pause/advance command.
 
-The Arduino should read complete lines without blocking its timer, LED, buzzer, or physical-button loop. Unknown message types, invalid JSON, and invalid fields should produce an `error` response and then be discarded.
+Messages are newline-delimited UTF-8 JSON over 115200 baud, 8 data bits, no parity, and one stop bit. The current wiring is WS2812 data on D6, buzzer on D7, play/pause on D4, and next-stage on D5. The firmware default is `LED_COUNT=116`, a documented compile-time setting.
 
-## Connection handshake
+## Handshake and health
 
-The operator starts the connection from the PWA with **Connect device**. Opening a Nano serial port may reset the board, so the PWA waits up to eight seconds for this message before treating the connection as failed:
-
-```json
-{"version":1,"type":"ready","device":"timelight-arduino","firmware":"0.1.0"}
-```
-
-The `device` and `firmware` fields are informational. The `version` and `type` fields are required.
-
-## PWA to Arduino
-
-Each command includes a unique `requestId`. The Arduino may acknowledge it with an `ack` message.
-
-Configure the active preset:
+The browser sends `hello` repeatedly every 250 ms for up to eight seconds after opening a port. This handles Nano auto-reset without requiring the browser to catch the one boot message. A hello establishes the browser session; the Arduino responds to every hello with `ready`.
 
 ```json
-{"version":1,"requestId":"...","type":"configure","preset":{"name":"Four-minute speech","speaker":"Speaker name","duration":240,"stages":[{"name":"Beginning","threshold":0,"color":"#56a9ff","blink":false,"buzzer":"none"},{"name":"Time reached","threshold":180,"color":"#ff6678","blink":true,"buzzer":"repeat"}]}}
+{"version":2,"requestId":"...","type":"hello","sessionId":"browser-session-id"}
 ```
-
-`duration` and each `threshold` are whole seconds from the start of the timer. Thresholds are ordered, start at zero or later, and must be less than `duration`. A preset has 3-5 stages. `buzzer` is one of `none`, `once`, or `repeat`; `color` is a six-digit CSS hex color. The optional boolean `blink` makes the light fade continuously on and off for that stage and defaults to `false` when omitted.
-
-Control the active timer:
 
 ```json
-{"version":1,"requestId":"...","type":"timer","action":"start"}
+{"version":2,"type":"ready","requestId":"...","device":"timelight-arduino","firmware":"0.2.0","ledCount":116,"buttons":["play_pause","next_stage"]}
 ```
 
-The valid actions are `start`, `pause`, `resume`, `reset`, and `advance`. The Arduino owns the monotonic timer clock; the browser does not send elapsed-time ticks.
+The Arduino also emits `ready` after boot. A ready message received on an already-open port causes the browser to repeat the handshake and resend its current output snapshot. It does not replay old timer transitions or chimes.
 
-## Arduino to PWA
-
-Acknowledgement:
+`ping` produces `pong`. `keepalive` is sent once per second while connected and renews a repeating-buzzer lease. Commands that have a `requestId` are acknowledged as follows:
 
 ```json
-{"version":1,"type":"ack","requestId":"...","command":"configure"}
+{"version":2,"type":"ack","requestId":"...","appliedRevision":12}
 ```
 
-Errors should identify the problem without stopping the firmware:
+The browser waits 500 ms and retries twice. The Arduino treats malformed or oversized lines as recoverable errors and continues its output and button loops. A v1 command receives a clear unsupported-protocol error.
+
+## Website to Arduino
+
+`set_outputs` is a complete declarative snapshot. Newer revisions supersede older revisions; duplicate or stale revisions are acknowledged without being applied.
 
 ```json
-{"version":1,"type":"error","requestId":"...","message":"Invalid stage threshold"}
+{"version":2,"requestId":"...","type":"set_outputs","sessionId":"browser-session-id","revision":12,"color":"#ff0000","ledEffect":"blink","transitionMs":450,"buzzerMode":"repeat","leaseMs":3000}
 ```
 
-The Arduino may periodically report timer state (recommended at 2-4 times per second):
+`ledEffect` is `off`, `solid`, or `blink`. `buzzerMode` is `none` or `repeat`. `leaseMs` is at most 3000 and is renewed by keepalive. If the lease expires, repeating audio is silenced while the last LED state remains.
+
+Stage-entry one-shot alerts use a session-scoped event ID. The Arduino deduplicates recent event IDs, making retries safe:
 
 ```json
-{"version":1,"type":"status","state":"running","elapsed":61,"stage":1}
+{"version":2,"requestId":"...","type":"buzz_once","sessionId":"browser-session-id","eventId":"run-id:stage-index"}
 ```
 
-`state` is `idle`, `running`, or `paused`. `elapsed` is whole seconds and `stage` is a zero-based stage index. Status messages are informational and do not need an acknowledgement.
+## Arduino to website
 
-While the timer is idle, the strip is off. It shows stage 1 only when a timer `start` action is accepted. The D4 button is equivalent to play/pause: it starts an idle timer, pauses a running timer, and resumes a paused timer. The D5 button is equivalent to `advance` and works while the timer is running or paused. Both buttons use the Arduino's internal pull-up and should connect their input pin to GND when pressed.
+Debounced buttons are reported only after a browser session has been established:
 
-## Ownership and recovery
+```json
+{"version":2,"type":"button","button":"play_pause","sequence":42}
+```
 
-The PWA owns presets and sends the selected configuration. The Arduino owns timer execution, LEDs, buzzer output, and physical buttons. Disconnecting USB must leave the last valid configuration and local physical controls usable. Reconnecting requires the `ready` handshake again; the PWA retains the selected preset and sends it after the handshake.
+`button` is `play_pause` or `next_stage`. The sequence is monotonic for the current MCU boot and the website deduplicates already-seen sequences before routing the event through the same reducer action as an on-screen control.
+
+## Loss and recovery
+
+The website timer continues while USB is unavailable. A lost link is shown persistently in the live timer. The browser reopens an already-authorized port with bounded backoff from 250 ms to five seconds, and the Reconnect control can close/reopen and re-handshake without a page reload. After each handshake it sends exactly the current output snapshot. Repeating audio is guaranteed to stop within the three-second lease; LEDs retain their last commanded state.
+
+On pause, the browser sends the current stage with repeating audio disabled, so the LEDs hold their appearance. Resume restores that stage's behavior. Reset sends `off` and clears the manual stage override.

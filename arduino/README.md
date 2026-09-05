@@ -1,6 +1,6 @@
 # TimeLight Arduino controller
 
-`TimeLightController.ino` is the minimal controller firmware for the current WS2812 strip prototype.
+`TimeLightController.ino` is a protocol-v2 circuit controller. The website owns the timer, preset snapshot, stages, elapsed time, and button decisions. The sketch only parses bounded JSON lines, renders declarative LED/buzzer effects, debounces buttons, acknowledges commands, and reports health.
 
 ## Wiring
 
@@ -9,10 +9,10 @@
 - Play/pause push button -> D4 and GND
 - Next-stage push button -> D5 and GND
 - WS2812 power and ground -> the appropriate 5 V supply and GND
-- Connect the Nano and the LED ground to a common ground
+- Connect the Nano and LED ground to a common ground
 
-The sketch configures a 100-pixel WS2812 strip. The PWA sends the active stage colors; the strip remains off while the timer is idle and shows the first stage only when the timer actually starts. The play/pause button on D4 starts, pauses, or resumes the timer; the next-stage button on D5 advances the active stage while the timer is running or paused. The buzzer follows its configured alert mode. In the five seconds leading up to a stage change, the strip gives a non-blocking breathing transition: the old color fades through several breaths, then the final breath rises in the new color.
+`LED_COUNT` is a compile-time firmware setting and defaults to **116**. Override it in the build if the physical strip has a different length. Install the **Adafruit NeoPixel** library from the Arduino IDE's Library Manager, select the correct Nano processor/port, and upload the sketch. The PWA uses 115200 baud.
 
-Install the **Adafruit NeoPixel** library from the Arduino IDE's Library Manager, select the correct Nano processor/port, and upload the sketch. Open the serial monitor at `115200` baud only for diagnostics; the PWA uses the same speed.
+The controller does not store or interpret presets, thresholds, elapsed time, or timer controls. It renders local blink/transition waveforms so USB traffic and browser paint delays do not affect LED smoothness. Repeating audio is protected by a three-second lease and stops if commands/keepalives stop. Physical buttons are silent until the browser handshake is established.
 
-The serial message contract is documented in [`../docs/serial-protocol.md`](../docs/serial-protocol.md). The sketch sends `ready` after boot, then accepts `configure` and `timer` messages. Its serial reader is line-buffered and bounded, so malformed or oversized input is rejected without blocking the timer loop.
+The complete contract is in [`../docs/serial-protocol.md`](../docs/serial-protocol.md).

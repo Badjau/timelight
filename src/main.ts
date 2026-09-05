@@ -1,12 +1,11 @@
 import { registerSW } from 'virtual:pwa-register';
-import { ArduinoSerial, type ControllerPreset, type DeviceMessage, type DeviceStatusMessage, type SerialStatus, type TimerCommand } from './serial';
+import { ArduinoSerial, type DeviceMessage, type SerialStatus } from './serial';
+import { deriveOutputs, elapsedSeconds, effectiveStage, persistableTimerRun, recoverTimerRun, reduceTimer, type PresetSnapshot, type Stage, type TimerAction, type TimerClock, type TimerRun } from './timer';
 import './style.css';
 
-type Stage = { name: string; threshold: number; color: string; blink?: boolean; buzzer: 'none' | 'once' | 'repeat' };
-type Preset = ControllerPreset & { id: string; updatedAt: string };
-type TimerState = 'idle' | 'running' | 'paused';
-
+type Preset = PresetSnapshot & { id: string; updatedAt: string };
 const STORAGE_KEY = 'timelight-presets-v1';
+const RUN_STORAGE_KEY = 'timelight-active-run-v2';
 const colors = ['#0000ff', '#ffff00', '#ff7b00', '#ff0000', '#b58cff'];
 const presetIcons = {
   new: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>',
@@ -14,7 +13,6 @@ const presetIcons = {
   save: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h10.5L16.5 5v11.5H4z" /><path d="M7 3.5v5h6v-5M7 16.5v-4h6v4" /></svg>',
   revert: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 6.5H3.5V3.5M3.8 6.2A6.5 6.5 0 1 1 4 13" /></svg>',
   delete: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11M8 3.5h4l1 2.5H7zM6 6l.6 10.5h6.8L14 6M8.5 8.5v5.5M11.5 8.5v5.5" /></svg>',
-  send: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m3.5 9.5 12-6-3.5 13-3-5zM9 13.5 16 3.5M3.5 9.5l6 2" /></svg>',
 } as const;
 const controllerConnectIcon = '<svg class="toolbar-icon controller-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3.5v4M13 3.5v4M5.5 7.5h9v4a4 4 0 0 1-8 0zM10 15.5v2M7.5 17.5h5" /></svg>';
 const defaultStages: Stage[] = [
@@ -23,204 +21,96 @@ const defaultStages: Stage[] = [
   { name: 'Nearing limit', threshold: 120, color: '#ff7b00', blink: false, buzzer: 'once' },
   { name: 'Time reached', threshold: 180, color: '#ff0000', blink: false, buzzer: 'repeat' },
 ];
-
 const appRoot = document.querySelector<HTMLDivElement>('#app');
 if (!appRoot) throw new Error('TimeLight app root was not found.');
 const app = appRoot;
 const serial = new ArduinoSerial();
+const starter: Preset = { id: crypto.randomUUID(), name: 'Four-minute speech', speaker: 'Speaker name', duration: 240, stages: structuredClone(defaultStages), updatedAt: new Date().toISOString() };
 
-function loadPresets(): Preset[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Preset[]; } catch { return []; }
-}
-function persist(): void { localStorage.setItem(STORAGE_KEY, JSON.stringify(presets)); }
+function loadPresets(): Preset[] { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Preset[]; } catch { return []; } }
+function persistPresets(): void { localStorage.setItem(STORAGE_KEY, JSON.stringify(presets)); }
+function clock(): TimerClock { return { wallMs: Date.now(), monotonicMs: performance.now() }; }
 function formatTime(seconds: number): string { const safe = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0)); return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`; }
 function toSeconds(value: string): number { const parts = value.trim().split(':'); if (!value.trim() || parts.length > 2 || parts.some((part) => !/^\d+$/.test(part))) return Number.NaN; if (parts.length === 1) return Number(parts[0]); const seconds = Number(parts[1]); return seconds > 59 ? Number.NaN : Number(parts[0]) * 60 + seconds; }
 function escapeHtml(value: string): string { return value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character] ?? character)); }
 
-const starter: Preset = { id: crypto.randomUUID(), name: 'Four-minute speech', speaker: 'Speaker name', duration: 240, stages: structuredClone(defaultStages), updatedAt: new Date().toISOString() };
-let presets: Preset[] = loadPresets();
+let presets = loadPresets();
 let current: Preset = structuredClone(presets[0] ?? starter);
 let revertTarget: Preset = structuredClone(current);
 let saved = Boolean(presets.length);
-let runtime: DeviceStatusMessage = { type: 'status', state: 'idle', elapsed: 0, stage: 0 };
+let activeRun: TimerRun | null = (() => { try { return recoverTimerRun(JSON.parse(localStorage.getItem(RUN_STORAGE_KEY) ?? 'null'), clock()); } catch { return null; } })();
 let timerInterval: number | undefined;
-let localTimerRunning = false;
-let localTimerStartedAt = 0;
-let localTimerElapsed = 0;
-let localTimerDuration = 0;
-let deviceCommandQueue: Promise<void> = Promise.resolve();
-let pendingDeviceTimer: { id: number; state: TimerState } | undefined;
-let nextDeviceCommandId = 0;
+let outputRevision = 1;
+let lastOutputs = deriveOutputs(null, clock());
+let reconnectTimer: number | undefined;
+let reconnectDelay = 250;
+let manualDisconnect = false;
+let lastButtonSequence = 0;
+let wakeLock: { released: boolean; release(): Promise<void>; addEventListener(type: string, listener: () => void): void } | null = null;
+let wakeLockWarning = false;
 
-function stageMarkup(stage: Stage, index: number): string {
-  return `<article class="stage-row ${index === 0 ? 'is-expanded' : ''}" data-index="${index}" style="--stage-color:${stage.color}">
-    <div class="stage-main"><span class="stage-number">${String(index + 1).padStart(2, '0')}</span><span class="stage-color" aria-hidden="true"></span>
-    <div class="stage-fields" id="stage-fields-${index}"><label>Stage name<input data-field="name" value="${escapeHtml(stage.name)}" maxlength="32" /></label><label>Starts at<input class="time-input" data-field="threshold" type="text" inputmode="numeric" maxlength="6" value="${formatTime(stage.threshold)}" /></label><label>Light color<div class="color-picker"><input data-field="color" type="color" value="${stage.color}" /><span>${stage.color}</span></div></label><label class="blink-field"><span>Blink </span><input data-field="blink" type="checkbox" ${stage.blink ? 'checked' : ''} /></label><label>Buzzer<select data-field="buzzer"><option value="none" ${stage.buzzer === 'none' ? 'selected' : ''}>No sound</option><option value="once" ${stage.buzzer === 'once' ? 'selected' : ''}>Chime once</option><option value="repeat" ${stage.buzzer === 'repeat' ? 'selected' : ''}>Repeat alert</option></select></label></div></div>
-    <div class="stage-summary"><button type="button" class="stage-toggle" data-stage-toggle aria-expanded="${index === 0}" aria-controls="stage-fields-${index}"><span class="stage-chevron" aria-hidden="true">&#8964;</span><span class="stage-summary-index">Stage ${index + 1}</span><strong class="stage-summary-name">${escapeHtml(stage.name || 'Untitled stage')}</strong><span class="stage-summary-threshold">${formatTime(stage.threshold)}</span><span class="stage-summary-color" aria-label="Light color ${stage.color}" title="Light color ${stage.color}"></span></button></div>
-    <div class="stage-actions"><button type="button" class="icon-button desktop-stage-action move-up" data-stage-action title="Move stage up" ${index === 0 ? 'disabled' : ''}>&uarr;</button><button type="button" class="icon-button desktop-stage-action move-down" data-stage-action title="Move stage down" ${index === current.stages.length - 1 ? 'disabled' : ''}>&darr;</button><button type="button" class="icon-button desktop-stage-action remove-stage" data-stage-action title="Remove stage" ${current.stages.length <= 3 ? 'disabled' : ''}>&times;</button><button type="button" class="icon-button stage-menu-toggle" data-stage-menu-toggle aria-label="Stage actions" aria-expanded="false">&#8942;</button><div class="stage-menu" hidden><button type="button" class="stage-menu-action move-up" data-stage-action ${index === 0 ? 'disabled' : ''}>Move up</button><button type="button" class="stage-menu-action move-down" data-stage-action ${index === current.stages.length - 1 ? 'disabled' : ''}>Move down</button><button type="button" class="stage-menu-action remove-stage" data-stage-action ${current.stages.length <= 3 ? 'disabled' : ''}>Delete stage</button></div></div>
-  </article>`;
-}
-
-function deviceStatusMarkup(): string {
-  const status = serial.status; const connected = status.state === 'connected';
-  return `<div class="controller-strip" id="controller-strip" aria-label="Arduino controller status"><span class="device-badge ${status.state}" id="device-badge"><i></i><span id="device-state">${escapeHtml(status.message)}</span></span><span id="device-detail" class="${status.state === 'error' ? 'is-error' : ''}">${status.firmware ? `Firmware ${escapeHtml(status.firmware)}` : 'Optional USB controller'}</span><button type="button" class="text-button controller-connect" id="device-connect" title="${connected ? 'Disconnect Arduino controller' : 'Connect an Arduino controller'}" aria-label="${connected ? 'Disconnect Arduino controller' : 'Connect an Arduino controller'}" ${status.state === 'connecting' || status.state === 'unsupported' ? 'disabled' : ''}>${controllerConnectIcon}</button></div>`;
-}
+function persistRun(): void { if (activeRun) localStorage.setItem(RUN_STORAGE_KEY, JSON.stringify(persistableTimerRun(activeRun))); else localStorage.removeItem(RUN_STORAGE_KEY); }
+function stageMarkup(stage: Stage, index: number): string { return `<article class="stage-row ${index === 0 ? 'is-expanded' : ''}" data-index="${index}" style="--stage-color:${stage.color}"><div class="stage-main"><span class="stage-number">${String(index + 1).padStart(2, '0')}</span><span class="stage-color" aria-hidden="true"></span><div class="stage-fields" id="stage-fields-${index}"><label>Stage name<input data-field="name" value="${escapeHtml(stage.name)}" maxlength="32" /></label><label>Starts at<input class="time-input" data-field="threshold" type="text" inputmode="numeric" maxlength="6" value="${formatTime(stage.threshold)}" /></label><label>Light color<div class="color-picker"><input data-field="color" type="color" value="${stage.color}" /><span>${stage.color}</span></div></label><label class="blink-field"><span>Blink </span><input data-field="blink" type="checkbox" ${stage.blink ? 'checked' : ''} /></label><label>Buzzer<select data-field="buzzer"><option value="none" ${stage.buzzer === 'none' ? 'selected' : ''}>No sound</option><option value="once" ${stage.buzzer === 'once' ? 'selected' : ''}>Chime once</option><option value="repeat" ${stage.buzzer === 'repeat' ? 'selected' : ''}>Repeat alert</option></select></label></div></div><div class="stage-summary"><button type="button" class="stage-toggle" data-stage-toggle aria-expanded="${index === 0}" aria-controls="stage-fields-${index}"><span class="stage-chevron" aria-hidden="true">&#8964;</span><span class="stage-summary-index">Stage ${index + 1}</span><strong class="stage-summary-name">${escapeHtml(stage.name || 'Untitled stage')}</strong><span class="stage-summary-threshold">${formatTime(stage.threshold)}</span><span class="stage-summary-color" aria-label="Light color ${stage.color}" title="Light color ${stage.color}"></span></button></div><div class="stage-actions"><button type="button" class="icon-button desktop-stage-action move-up" data-stage-action ${index === 0 ? 'disabled' : ''}>&uarr;</button><button type="button" class="icon-button desktop-stage-action move-down" data-stage-action ${index === current.stages.length - 1 ? 'disabled' : ''}>&darr;</button><button type="button" class="icon-button desktop-stage-action remove-stage" data-stage-action ${current.stages.length <= 3 ? 'disabled' : ''}>&times;</button><button type="button" class="icon-button stage-menu-toggle" data-stage-menu-toggle aria-label="Stage actions" aria-expanded="false">&#8942;</button><div class="stage-menu" hidden><button type="button" class="stage-menu-action move-up" data-stage-action ${index === 0 ? 'disabled' : ''}>Move up</button><button type="button" class="stage-menu-action move-down" data-stage-action ${index === current.stages.length - 1 ? 'disabled' : ''}>Move down</button><button type="button" class="stage-menu-action remove-stage" data-stage-action ${current.stages.length <= 3 ? 'disabled' : ''}>Delete stage</button></div></div></article>`; }
+function deviceStatusMarkup(): string { const status = serial.status; const connected = status.state === 'connected'; const label = connected ? 'Disconnect Arduino controller' : 'Reconnect Arduino controller'; return `<div class="controller-strip" id="controller-strip" aria-label="Arduino controller status"><span class="device-badge ${status.state}" id="device-badge"><i></i><span id="device-state">${escapeHtml(status.message)}</span></span><span id="device-detail" class="${status.warning ? 'is-error' : ''}">${status.firmware ? `Firmware ${escapeHtml(status.firmware)}` : 'Optional USB controller'}</span><button type="button" class="text-button" id="device-ping" title="Check controller health" ${connected ? '' : 'disabled'}>Check</button><button type="button" class="text-button controller-connect" id="device-connect" title="${label}" aria-label="${label}" ${status.state === 'connecting' || status.state === 'unsupported' ? 'disabled' : ''}>${controllerConnectIcon}</button></div>`; }
 
 function render(): void {
-  const name = current.name || 'Untitled preset';
-  const speaker = current.speaker.trim() || 'Speaker name';
-  app.innerHTML = `<div class="page-shell"><header class="topbar"><div class="title-block"><a class="brand" href="/timelight/" aria-label="TimeLight home"><span class="brand-mark"><span class="lamp lamp-blue"></span><span class="lamp lamp-yellow"></span><span class="lamp lamp-red"></span></span><span>TimeLight</span></a>${deviceStatusMarkup()}</div></header>
-  <main class="wireframe-flow"><section class="wireframe-card editor-card" aria-label="Preset editor"><header class="wireframe-toolbar"><div class="preset-control"><div class="toolbar-actions preset-actions" aria-label="Preset actions"><button type="button" class="toolbar-button icon-toolbar-button" id="new-preset" title="New preset" aria-label="New preset">${presetIcons.new}</button><button type="button" class="toolbar-button icon-toolbar-button" id="duplicate-preset" title="Duplicate preset" aria-label="Duplicate preset">${presetIcons.duplicate}</button><button type="button" class="toolbar-button icon-toolbar-button revert-button" id="reset-form" title="Revert changes" aria-label="Revert changes" ${saved ? 'hidden' : ''}>${presetIcons.revert}</button><button type="button" class="toolbar-button icon-toolbar-button save-button" id="save-preset" title="Save preset" aria-label="Save preset" ${saved ? 'disabled' : ''}>${presetIcons.save}</button></div><div class="preset-picker"><div class="preset-input-wrap"><input id="preset-name" required maxlength="48" value="${escapeHtml(current.name)}" placeholder="Preset name" aria-label="Preset name" /><button type="button" class="preset-picker-toggle" id="preset-picker-toggle" aria-label="Show saved presets" aria-expanded="false">&#8964;</button></div><div class="preset-menu" id="preset-menu" hidden>${presets.length ? `<span class="preset-menu-label">Saved presets</span>${presets.map((preset) => `<button type="button" class="saved-preset ${preset.id === current.id ? 'active' : ''}" data-preset="${preset.id}">${escapeHtml(preset.name || 'Untitled preset')}</button>`).join('')}` : '<span class="preset-menu-empty">No saved presets yet</span>'}</div></div></div><div class="toolbar-actions"><button type="button" class="toolbar-button icon-toolbar-button" id="send-config" title="Send preset to Arduino controller" aria-label="Send preset to Arduino controller" disabled>${presetIcons.send}</button><button type="button" class="toolbar-button icon-toolbar-button danger-button" id="delete-preset" title="Delete preset" aria-label="Delete preset" ${presets.some((preset) => preset.id === current.id) ? '' : 'hidden'}>${presetIcons.delete}</button></div></header>
-  <div class="overview-canvas"><div class="overview-layout"><div class="overview-summary"><div class="overview-fields"><label>Speaker <span class="optional">optional</span><input id="speaker" maxlength="48" value="${escapeHtml(current.speaker)}" placeholder="Who is speaking?" /></label><label>Total duration<input id="duration" class="time-input" required type="text" inputmode="numeric" maxlength="6" value="${formatTime(current.duration)}" /></label></div></div><div class="stage-overview"><div class="stage-overview-heading"><span>Stages</span><strong id="stage-count">${current.stages.length} of 5</strong></div><div class="stage-list" id="stage-list">${current.stages.map(stageMarkup).join('')}</div><button type="button" class="add-stage" id="add-stage" ${current.stages.length >= 5 ? 'disabled' : ''}>+ Add stage</button></div></div></div>
-  <footer class="editor-footer"><div class="footer-actions"><button type="button" class="primary-button" id="play-preset">Start <span>&rarr;</span></button></div></footer></section></main>
-  <div class="live-overlay" id="live-overlay" hidden><section class="wireframe-card live-card" id="timer-panel" aria-labelledby="live-title" role="dialog" aria-modal="true"><header class="live-header"><button type="button" class="back-button" id="back-to-editor" aria-label="Back to editor">&larr;</button><div class="live-heading"><h2 id="live-title">${escapeHtml(name)}</h2><span class="live-speaker live-speaker-status" aria-label="Speaker">${escapeHtml(speaker)}</span></div></header><div class="live-layout"><div class="control-zone"><span class="zone-label">Controls</span><button type="button" class="big-control" id="local-play"><span id="play-icon">&#9654;</span><b id="play-label">Play</b><small id="play-hint">start timer</small></button><div class="small-controls"><button type="button" class="secondary-button" id="local-reset">Reset</button><button type="button" class="secondary-button" id="local-next-stage">Next stage</button></div></div><div class="timer-zone"><div class="timer-display"><span id="timer-value">${formatTime(localTimerElapsed)}</span><small>elapsed time</small></div><div class="progress-track" role="progressbar" aria-label="Timer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="timer-progress"></span></div><div class="stage-progress" id="stage-progress">${current.stages.map((stage, index) => `<div class="stage-progress-item ${index === 0 ? 'active' : ''}" data-progress-index="${index}"><span style="--stage-color:${stage.color}"></span><b>${escapeHtml(stage.name)}</b><small>${formatTime(stage.threshold)}</small></div>`).join('')}</div><div class="timer-note">Use Next stage to move ahead manually.</div></div></div></section></div></div>`;
-  bindEvents(); updateEditorActions(); updateTimerUi();
+  const name = activeRun?.preset.name || current.name || 'Untitled preset'; const speaker = (activeRun?.preset.speaker || current.speaker).trim() || 'Speaker name';
+  app.innerHTML = `<div class="page-shell"><header class="topbar"><div class="title-block"><a class="brand" href="/timelight/" aria-label="TimeLight home"><span class="brand-mark"><span class="lamp lamp-blue"></span><span class="lamp lamp-yellow"></span><span class="lamp lamp-red"></span></span><span>TimeLight</span></a>${deviceStatusMarkup()}</div></header><main class="wireframe-flow"><section class="wireframe-card editor-card" aria-label="Preset editor"><header class="wireframe-toolbar"><div class="preset-control"><div class="toolbar-actions preset-actions"><button type="button" class="toolbar-button icon-toolbar-button" id="new-preset" title="New preset" aria-label="New preset">${presetIcons.new}</button><button type="button" class="toolbar-button icon-toolbar-button" id="duplicate-preset" title="Duplicate preset" aria-label="Duplicate preset">${presetIcons.duplicate}</button><button type="button" class="toolbar-button icon-toolbar-button revert-button" id="reset-form" title="Revert changes" aria-label="Revert changes" ${saved ? 'hidden' : ''}>${presetIcons.revert}</button><button type="button" class="toolbar-button icon-toolbar-button save-button" id="save-preset" title="Save preset" aria-label="Save preset" ${saved ? 'disabled' : ''}>${presetIcons.save}</button></div><div class="preset-picker"><div class="preset-input-wrap"><input id="preset-name" required maxlength="48" value="${escapeHtml(current.name)}" placeholder="Preset name" aria-label="Preset name" /><button type="button" class="preset-picker-toggle" id="preset-picker-toggle" aria-label="Show saved presets" aria-expanded="false">&#8964;</button></div><div class="preset-menu" id="preset-menu" hidden>${presets.length ? `<span class="preset-menu-label">Saved presets</span>${presets.map((preset) => `<button type="button" class="saved-preset ${preset.id === current.id ? 'active' : ''}" data-preset="${preset.id}">${escapeHtml(preset.name || 'Untitled preset')}</button>`).join('')}` : '<span class="preset-menu-empty">No saved presets yet</span>'}</div></div></div><div class="toolbar-actions"><button type="button" class="toolbar-button icon-toolbar-button danger-button" id="delete-preset" title="Delete preset" aria-label="Delete preset" ${presets.some((preset) => preset.id === current.id) ? '' : 'hidden'}>&times;</button></div></header><div class="overview-canvas"><div class="overview-layout"><div class="overview-summary"><div class="overview-fields"><label>Speaker <span class="optional">optional</span><input id="speaker" maxlength="48" value="${escapeHtml(current.speaker)}" placeholder="Who is speaking?" /></label><label>Total duration<input id="duration" class="time-input" required type="text" inputmode="numeric" maxlength="6" value="${formatTime(current.duration)}" /></label></div></div><div class="stage-overview"><div class="stage-overview-heading"><span>Stages</span><strong id="stage-count">${current.stages.length} of 5</strong></div><div class="stage-list" id="stage-list">${current.stages.map(stageMarkup).join('')}</div><button type="button" class="add-stage" id="add-stage" ${current.stages.length >= 5 ? 'disabled' : ''}>+ Add stage</button></div></div></div><footer class="editor-footer"><div class="footer-actions"><button type="button" class="primary-button" id="play-preset">${activeRun ? 'Open timer' : 'Start'} <span>&rarr;</span></button></div></footer></section></main><div class="live-overlay" id="live-overlay" ${activeRun ? '' : 'hidden'}><section class="wireframe-card live-card" id="timer-panel" aria-labelledby="live-title" role="dialog" aria-modal="true"><header class="live-header"><button type="button" class="back-button" id="back-to-editor" aria-label="Back to editor">&larr;</button><div class="live-heading"><h2 id="live-title">${escapeHtml(name)}</h2><span class="live-speaker live-speaker-status" aria-label="Speaker">${escapeHtml(speaker)}</span></div></header><div class="live-layout"><div class="control-zone"><span class="zone-label">Controls</span><button type="button" class="big-control" id="local-play"><span id="play-icon">&#9654;</span><b id="play-label">Play</b><small id="play-hint">start timer</small></button><div class="small-controls"><button type="button" class="secondary-button" id="local-reset">Reset</button><button type="button" class="secondary-button" id="local-next-stage">Next stage</button></div></div><div class="timer-zone"><div class="timer-display"><span id="timer-value">00:00</span><small>elapsed time</small></div><div class="progress-track" role="progressbar" aria-label="Timer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="timer-progress"></span></div><div class="stage-progress" id="stage-progress">${(activeRun?.preset ?? current).stages.map((stage, index) => `<div class="stage-progress-item" data-progress-index="${index}"><span style="--stage-color:${stage.color}"></span><b>${escapeHtml(stage.name)}</b><small>${formatTime(stage.threshold)}</small></div>`).join('')}</div><div class="timer-note">The final stage continues beyond the configured duration. Use Next stage to move ahead manually.</div><div class="timer-warnings" id="timer-warnings" aria-live="polite"></div></div></div></section></div></div>`;
+  bindEvents(); updateEditorActions(); updateTimerUi(); syncTimerLoop(); void syncWakeLock();
 }
 
-function syncCurrentFromForm(): void {
-  const value = (selector: string) => document.querySelector<HTMLInputElement>(selector)?.value;
-  current.name = value('#preset-name') ?? current.name; current.speaker = value('#speaker') ?? current.speaker; current.duration = toSeconds(value('#duration') ?? '');
-  document.querySelectorAll<HTMLElement>('.stage-row').forEach((row, index) => { const get = (field: string) => row.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-field="${field}"]`); const stage = current.stages[index]; if (!stage) return; stage.name = get('name')?.value ?? stage.name; stage.threshold = toSeconds(get('threshold')?.value ?? ''); stage.color = get('color')?.value ?? stage.color; stage.blink = (get('blink') as HTMLInputElement | null)?.checked ?? false; stage.buzzer = (get('buzzer')?.value ?? stage.buzzer) as Stage['buzzer']; });
-}
-function validCurrent(): boolean { return Boolean(current.name.trim()) && Number.isFinite(current.duration) && current.duration >= 1 && current.stages.every((stage, index) => Number.isFinite(stage.threshold) && stage.threshold >= 0 && stage.threshold < current.duration && (index === 0 || stage.threshold > current.stages[index - 1].threshold)); }
+function syncCurrentFromForm(): void { const value = (selector: string) => document.querySelector<HTMLInputElement>(selector)?.value; current.name = value('#preset-name') ?? current.name; current.speaker = value('#speaker') ?? current.speaker; current.duration = toSeconds(value('#duration') ?? ''); document.querySelectorAll<HTMLElement>('.stage-row').forEach((row, index) => { const get = (field: string) => row.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-field="${field}"]`); const stage = current.stages[index]; if (!stage) return; stage.name = get('name')?.value ?? stage.name; stage.threshold = toSeconds(get('threshold')?.value ?? ''); stage.color = get('color')?.value ?? stage.color; stage.blink = (get('blink') as HTMLInputElement | null)?.checked ?? false; stage.buzzer = (get('buzzer')?.value ?? stage.buzzer) as Stage['buzzer']; }); }
+function validCurrent(): boolean { return Boolean(current.name.trim()) && Number.isFinite(current.duration) && current.duration >= 1 && current.stages.length >= 3 && current.stages.every((stage, index) => Number.isFinite(stage.threshold) && stage.threshold >= 0 && stage.threshold < current.duration && (index === 0 || stage.threshold > current.stages[index - 1].threshold)); }
 function showInvalid(): void { document.querySelector('.overview-canvas')?.classList.add('invalid'); window.setTimeout(() => document.querySelector('.overview-canvas')?.classList.remove('invalid'), 1200); }
 function updateEditorActions(): void { const save = document.querySelector<HTMLButtonElement>('#save-preset'); const revert = document.querySelector<HTMLButtonElement>('#reset-form'); if (save) save.disabled = saved; if (revert) revert.hidden = saved; }
-function savePreset(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } current.updatedAt = new Date().toISOString(); const existing = presets.findIndex((preset) => preset.id === current.id); if (existing >= 0) presets[existing] = structuredClone(current); else presets.unshift(structuredClone(current)); persist(); revertTarget = structuredClone(current); saved = true; render(); if (serial.status.state === 'connected') void sendConfiguration(); }
-async function sendConfiguration(): Promise<void> { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } try { await serial.sendConfiguration(current); } catch (error) { const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send the preset'; } }
-function handleDeviceCommand(command: TimerCommand, targetState?: TimerState): Promise<void> {
-  const commandId = ++nextDeviceCommandId;
-  if (targetState) pendingDeviceTimer = { id: commandId, state: targetState };
-  const task = deviceCommandQueue.then(async () => {
-    try {
-      await serial.sendTimerCommand(command);
-    } catch (error) {
-      if (pendingDeviceTimer?.id === commandId) pendingDeviceTimer = undefined;
-      const detail = document.querySelector('#device-detail'); if (detail) detail.textContent = error instanceof Error ? error.message : 'Could not send timer command';
-      updateTimerUi();
-    }
-  });
-  deviceCommandQueue = task;
-  return task;
+function configuredSnapshot(): PresetSnapshot { syncCurrentFromForm(); return { name: current.name, speaker: current.speaker, duration: current.duration, stages: structuredClone(current.stages) }; }
+function dispatch(action: TimerAction): void {
+  const before = activeRun; const result = reduceTimer(activeRun, action, clock()); activeRun = result.run; persistRun();
+  if (result.run && result.chime) void serial.buzzOnce(`${result.run.runId}:${effectiveStage(result.run, clock())}`).catch(() => undefined);
+  applyOutputs(false); updateTimerUi(); syncTimerLoop(); void syncWakeLock();
+  if (action.type === 'start' && !before) { const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (overlay) overlay.hidden = false; document.body.classList.add('live-open'); }
 }
-
+function outputChanged(a: ReturnType<typeof deriveOutputs>, b: ReturnType<typeof deriveOutputs>): boolean { return a.color !== b.color || a.ledEffect !== b.ledEffect || a.transitionMs !== b.transitionMs || a.buzzerMode !== b.buzzerMode; }
+function applyOutputs(force: boolean): void { const next = deriveOutputs(activeRun, clock()); if (!force && !outputChanged(next, lastOutputs)) return; if (!force) outputRevision++; lastOutputs = next; void serial.setOutputs({ ...next, revision: outputRevision }).catch(() => undefined); }
+function savePreset(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } current.updatedAt = new Date().toISOString(); const existing = presets.findIndex((preset) => preset.id === current.id); if (existing >= 0) presets[existing] = structuredClone(current); else presets.unshift(structuredClone(current)); persistPresets(); revertTarget = structuredClone(current); saved = true; render(); }
 function updateTimerUi(): void {
-  const configuredDuration = Number.isFinite(current.duration) && current.duration > 0 ? current.duration : 0;
-  const duration = localTimerDuration > 0 && (localTimerRunning || localTimerElapsed > 0) ? localTimerDuration : configuredDuration;
-  const elapsed = localTimerRunning ? localTimerElapsed + (Date.now() - localTimerStartedAt) / 1000 : localTimerElapsed;
-  if (localTimerRunning && duration > 0 && elapsed >= duration) {
-    localTimerElapsed = duration; localTimerRunning = false;
-    if (timerInterval) window.clearInterval(timerInterval); timerInterval = undefined;
-  }
-  const safeElapsed = duration > 0 ? Math.min(duration, Math.max(0, localTimerRunning ? elapsed : localTimerElapsed)) : 0;
-  const finalStageThreshold = current.stages[current.stages.length - 1]?.threshold ?? 0;
-  const progressDuration = finalStageThreshold > 0 ? finalStageThreshold : duration;
-  const progressPercent = progressDuration > 0 ? Math.min(100, Math.max(0, safeElapsed / progressDuration * 100)) : 0;
-  const timerValue = document.querySelector('#timer-value'); const progress = document.querySelector<HTMLElement>('#timer-progress'); const progressTrack = progress?.parentElement; if (timerValue) timerValue.textContent = formatTime(safeElapsed); if (progress) progress.style.width = `${progressPercent}%`; if (progressTrack) progressTrack.setAttribute('aria-valuenow', progressPercent.toFixed(1)); const playIcon = document.querySelector('#play-icon'); const playLabel = document.querySelector('#play-label'); const playHint = document.querySelector('#play-hint'); const connectedTimerState = pendingDeviceTimer?.state ?? runtime.state; const running = localTimerRunning || (serial.status.state === 'connected' && connectedTimerState === 'running'); if (playIcon) playIcon.innerHTML = running ? '&#10074;&#10074;' : '&#9654;'; if (playLabel) playLabel.textContent = running ? 'Pause' : 'Play'; if (playHint) playHint.textContent = running ? 'pause timer' : 'start timer';
-  const stageIndex = current.stages.reduce((active, stage, index) => safeElapsed >= stage.threshold ? index : active, 0); document.querySelectorAll<HTMLElement>('[data-progress-index]').forEach((item, index) => item.classList.toggle('active', index === stageIndex)); const state = document.querySelector('#live-state'); if (state) state.textContent = localTimerRunning ? 'Running' : safeElapsed >= duration && duration > 0 ? 'Complete' : safeElapsed > 0 ? 'Paused' : 'Ready';
+  const run = activeRun; if (!run) return; const elapsed = elapsedSeconds(run, clock()); const duration = Math.max(1, run.preset.duration); const percent = Math.min(100, Math.max(0, elapsed / duration * 100));
+  const value = document.querySelector('#timer-value'); const progress = document.querySelector<HTMLElement>('#timer-progress'); const track = progress?.parentElement; if (value) value.textContent = formatTime(elapsed); if (progress) progress.style.width = `${percent}%`; if (track) track.setAttribute('aria-valuenow', percent.toFixed(1));
+  const running = run.state === 'running'; const icon = document.querySelector('#play-icon'); const label = document.querySelector('#play-label'); const hint = document.querySelector('#play-hint'); if (icon) icon.innerHTML = running ? '&#10074;&#10074;' : '&#9654;'; if (label) label.textContent = running ? 'Pause' : run.state === 'paused' ? 'Resume' : 'Play'; if (hint) hint.textContent = running ? 'pause timer' : run.state === 'paused' ? 'resume timer' : 'start timer';
+  const stage = effectiveStage(run, clock()); document.querySelectorAll<HTMLElement>('[data-progress-index]').forEach((item, index) => item.classList.toggle('active', index === stage)); updateWarnings();
 }
-function startLocalTimer(): void { if (localTimerRunning) return; localTimerDuration = configuredTimerDuration(); localTimerStartedAt = Date.now(); localTimerRunning = true; timerInterval = window.setInterval(updateTimerUi, 250); updateTimerUi(); }
-function pauseLocalTimer(): void { if (!localTimerRunning) return; localTimerElapsed += (Date.now() - localTimerStartedAt) / 1000; localTimerRunning = false; if (timerInterval) window.clearInterval(timerInterval); timerInterval = undefined; updateTimerUi(); }
-function configuredTimerDuration(): number { return Number.isFinite(current.duration) && current.duration > 0 ? current.duration : 0; }
-function resetLocalTimer(): void { localTimerRunning = false; localTimerElapsed = 0; localTimerDuration = 0; if (timerInterval) window.clearInterval(timerInterval); timerInterval = undefined; updateTimerUi(); }
-function nextLocalStage(): void { if (!localTimerRunning && (serial.status.state !== 'connected' || (runtime.state !== 'running' && runtime.state !== 'paused'))) return; const elapsed = localTimerRunning ? localTimerElapsed + (Date.now() - localTimerStartedAt) / 1000 : localTimerElapsed; const next = current.stages.find((stage) => stage.threshold > elapsed + 0.1); if (!next) return; localTimerElapsed = next.threshold; if (localTimerRunning) localTimerStartedAt = Date.now(); updateTimerUi(); if (serial.status.state === 'connected') void handleDeviceCommand('advance'); }
-async function openLiveView(): Promise<void> { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } if (serial.status.state === 'connected') await sendConfiguration(); resetLocalTimer(); const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (!overlay) return; overlay.hidden = false; document.body.classList.add('live-open'); window.setTimeout(() => document.querySelector<HTMLButtonElement>('#local-play')?.focus(), 0); updateTimerUi(); }
-function stopLiveTimer(): void {
-  const shouldResetDeviceTimer = serial.status.state === 'connected' && (pendingDeviceTimer?.state ?? runtime.state) !== 'idle';
-  resetLocalTimer();
-  if (shouldResetDeviceTimer) void handleDeviceCommand('reset', 'idle');
-}
-function closeLiveView(): void {
-  const overlay = document.querySelector<HTMLElement>('#live-overlay');
-  if (!overlay || overlay.hidden) return;
-  stopLiveTimer();
-  overlay.hidden = true;
-  document.body.classList.remove('live-open');
-}
+function syncTimerLoop(): void { if (activeRun?.state === 'running' && !timerInterval) timerInterval = window.setInterval(() => { dispatch({ type: 'tick' }); }, 250); if (activeRun?.state !== 'running' && timerInterval) { window.clearInterval(timerInterval); timerInterval = undefined; } }
+function updateWarnings(): void { const target = document.querySelector<HTMLElement>('#timer-warnings'); if (!target) return; const warnings: string[] = []; if (activeRun?.state === 'running' && document.hidden) warnings.push('This page is hidden; keep it visible for reliable timing.'); if (activeRun?.state === 'running' && wakeLockWarning) warnings.push('Screen wake lock is unavailable or was released.'); if (activeRun?.state === 'running' && serial.status.state !== 'connected') warnings.push('Hardware link lost; the website timer continues and repeating audio will be silenced.'); if (activeRun?.clockWarning) warnings.push(activeRun.clockWarning); target.innerHTML = warnings.map((warning) => `<div class="timer-warning">${escapeHtml(warning)}</div>`).join(''); }
+async function syncWakeLock(): Promise<void> { const wakeApi = (navigator as Navigator & { wakeLock?: { request(type: 'screen'): Promise<{ released: boolean; release(): Promise<void>; addEventListener(type: string, listener: () => void): void }> } }).wakeLock; if (!activeRun || activeRun.state !== 'running' || document.hidden) { if (wakeLock) await wakeLock.release().catch(() => undefined); wakeLock = null; wakeLockWarning = false; updateWarnings(); return; } if (!wakeApi) { wakeLockWarning = true; updateWarnings(); return; } try { if (!wakeLock || wakeLock.released) { wakeLock = await wakeApi.request('screen'); wakeLockWarning = false; wakeLock.addEventListener('release', () => { wakeLockWarning = true; updateWarnings(); }); } } catch { wakeLockWarning = true; } updateWarnings(); }
+function openLiveView(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (!overlay) return; overlay.hidden = false; document.body.classList.add('live-open'); window.setTimeout(() => document.querySelector<HTMLButtonElement>('#local-play')?.focus(), 0); updateTimerUi(); }
+function closeLiveView(): void { const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (!overlay || overlay.hidden) return; overlay.hidden = true; document.body.classList.remove('live-open'); }
 
 function bindEvents(): void {
   document.querySelector('#preset-picker-toggle')?.addEventListener('click', () => { const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (!menu || !toggle) return; menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
-  document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((button) => button.addEventListener('click', () => { current = structuredClone(presets.find((preset) => preset.id === button.dataset.preset) ?? starter); revertTarget = structuredClone(current); saved = true; resetLocalTimer(); render(); }));
+  document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((button) => button.addEventListener('click', () => { current = structuredClone(presets.find((preset) => preset.id === button.dataset.preset) ?? starter); revertTarget = structuredClone(current); saved = true; render(); }));
   document.querySelector('.editor-card')?.addEventListener('input', () => { saved = false; updateEditorActions(); });
-  document.querySelector('#new-preset')?.addEventListener('click', () => { current = { id: crypto.randomUUID(), name: '', speaker: '', duration: 240, stages: structuredClone(defaultStages), updatedAt: '' }; revertTarget = structuredClone(current); saved = false; resetLocalTimer(); render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
-  document.querySelector('#duplicate-preset')?.addEventListener('click', () => { syncCurrentFromForm(); current = { ...structuredClone(current), id: crypto.randomUUID(), name: `${current.name || 'Untitled preset'} copy`, updatedAt: '' }; revertTarget = structuredClone(current); saved = false; resetLocalTimer(); render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
-  document.querySelector('#play-preset')?.addEventListener('click', () => void openLiveView());
-  document.querySelector('#back-to-editor')?.addEventListener('click', closeLiveView);
-  document.querySelector('#live-overlay')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeLiveView(); });
-  document.querySelector('#save-preset')?.addEventListener('click', savePreset);
-  document.querySelector('#reset-form')?.addEventListener('click', () => { current = structuredClone(revertTarget); saved = presets.some((preset) => preset.id === current.id); resetLocalTimer(); render(); });
-  document.querySelector('#delete-preset')?.addEventListener('click', () => { presets = presets.filter((preset) => preset.id !== current.id); persist(); current = structuredClone(presets[0] ?? starter); revertTarget = structuredClone(current); saved = presets.length > 0; resetLocalTimer(); render(); });
+  document.querySelector('#new-preset')?.addEventListener('click', () => { current = { id: crypto.randomUUID(), name: '', speaker: '', duration: 240, stages: structuredClone(defaultStages), updatedAt: '' }; revertTarget = structuredClone(current); saved = false; render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
+  document.querySelector('#duplicate-preset')?.addEventListener('click', () => { syncCurrentFromForm(); current = { ...structuredClone(current), id: crypto.randomUUID(), name: `${current.name || 'Untitled preset'} copy`, updatedAt: '' }; revertTarget = structuredClone(current); saved = false; render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
+  document.querySelector('#play-preset')?.addEventListener('click', () => { if (!activeRun) { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } openLiveView(); } else openLiveView(); });
+  document.querySelector('#back-to-editor')?.addEventListener('click', closeLiveView); document.querySelector('#live-overlay')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeLiveView(); }); document.querySelector('#save-preset')?.addEventListener('click', savePreset);
+  document.querySelector('#reset-form')?.addEventListener('click', () => { current = structuredClone(revertTarget); saved = presets.some((preset) => preset.id === current.id); render(); });
+  document.querySelector('#delete-preset')?.addEventListener('click', () => { presets = presets.filter((preset) => preset.id !== current.id); persistPresets(); current = structuredClone(presets[0] ?? starter); revertTarget = structuredClone(current); saved = presets.length > 0; render(); });
   document.querySelector('#add-stage')?.addEventListener('click', () => { syncCurrentFromForm(); current.stages.push({ name: 'New stage', threshold: (current.stages[current.stages.length - 1]?.threshold || 0) + 60, color: colors[current.stages.length], blink: false, buzzer: 'once' }); saved = false; render(); });
-  document.querySelector('#stage-list')?.addEventListener('click', (event) => {
-    const target = event.target as HTMLElement;
-    const menuToggle = target.closest<HTMLButtonElement>('[data-stage-menu-toggle]');
-    if (menuToggle) {
-      const menu = menuToggle.parentElement?.querySelector<HTMLElement>('.stage-menu');
-      if (!menu) return;
-      const open = menu.hidden;
-      document.querySelectorAll<HTMLElement>('.stage-menu').forEach((item) => { item.hidden = true; });
-      document.querySelectorAll<HTMLButtonElement>('[data-stage-menu-toggle]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
-      menu.hidden = !open;
-      menuToggle.setAttribute('aria-expanded', String(open));
-      return;
-    }
-    const toggle = target.closest<HTMLButtonElement>('[data-stage-toggle]');
-    if (toggle) {
-      const row = toggle.closest<HTMLElement>('.stage-row');
-      if (!row) return;
-      const expanded = row.classList.toggle('is-expanded');
-      toggle.setAttribute('aria-expanded', String(expanded));
-      return;
-    }
-    const action = target.closest<HTMLButtonElement>('[data-stage-action]');
-    const row = action?.closest<HTMLElement>('.stage-row');
-    if (!action || !row || action.disabled) return;
-    syncCurrentFromForm();
-    const index = Number(row.dataset.index);
-    if (action.classList.contains('move-up')) [current.stages[index - 1], current.stages[index]] = [current.stages[index], current.stages[index - 1]];
-    if (action.classList.contains('move-down')) [current.stages[index], current.stages[index + 1]] = [current.stages[index + 1], current.stages[index]];
-    if (action.classList.contains('remove-stage')) current.stages.splice(index, 1);
-    saved = false;
-    render();
-  });
-  document.querySelector('#stage-list')?.addEventListener('input', (event) => {
-    const input = event.target as HTMLInputElement;
-    const row = input.closest<HTMLElement>('.stage-row');
-    if (!row) return;
-    if (input.dataset.field === 'color') {
-      row.style.setProperty('--stage-color', input.value);
-      const label = input.parentElement?.querySelector('span');
-      if (label) label.textContent = input.value;
-      const summaryColor = row.querySelector<HTMLElement>('.stage-summary-color');
-      if (summaryColor) {
-        summaryColor.setAttribute('aria-label', `Light color ${input.value}`);
-        summaryColor.title = `Light color ${input.value}`;
-      }
-    }
-    if (input.dataset.field === 'name') {
-      const summaryName = row.querySelector<HTMLElement>('.stage-summary-name');
-      if (summaryName) summaryName.textContent = input.value || 'Untitled stage';
-    }
-    if (input.dataset.field === 'threshold') {
-      const summaryThreshold = row.querySelector<HTMLElement>('.stage-summary-threshold');
-      if (summaryThreshold) summaryThreshold.textContent = input.value || '00:00';
-    }
-  });
-   document.querySelector('#local-play')?.addEventListener('click', () => {
-    if (serial.status.state === 'connected') {
-      const state = pendingDeviceTimer?.state ?? runtime.state;
-      if (state === 'running') void handleDeviceCommand('pause', 'paused');
-      else if (state === 'paused') void handleDeviceCommand('resume', 'running');
-      else void handleDeviceCommand('start', 'running');
-      return;
-    }
-    if (localTimerRunning) pauseLocalTimer();
-    else startLocalTimer();
-   }); document.querySelector('#local-reset')?.addEventListener('click', () => { resetLocalTimer(); if (serial.status.state === 'connected') void handleDeviceCommand('reset', 'idle'); }); document.querySelector('#local-next-stage')?.addEventListener('click', nextLocalStage);
-   document.querySelector('#send-config')?.addEventListener('click', () => void sendConfiguration());
-  document.querySelector('#device-connect')?.addEventListener('click', async () => { const button = document.querySelector<HTMLButtonElement>('#device-connect'); if (serial.status.state === 'connected') { await serial.disconnect(); return; } if (button) button.disabled = true; try { await serial.connect(); await sendConfiguration(); } catch { /* status listener provides the reason */ } finally { updateDeviceUi(serial.status); } });
+  document.querySelector('#stage-list')?.addEventListener('click', (event) => { const target = event.target as HTMLElement; const menuToggle = target.closest<HTMLButtonElement>('[data-stage-menu-toggle]'); if (menuToggle) { const menu = menuToggle.parentElement?.querySelector<HTMLElement>('.stage-menu'); if (!menu) return; const open = menu.hidden; document.querySelectorAll<HTMLElement>('.stage-menu').forEach((item) => { item.hidden = true; }); menu.hidden = !open; menuToggle.setAttribute('aria-expanded', String(open)); return; } const toggle = target.closest<HTMLButtonElement>('[data-stage-toggle]'); if (toggle) { const row = toggle.closest<HTMLElement>('.stage-row'); if (row) { const expanded = row.classList.toggle('is-expanded'); toggle.setAttribute('aria-expanded', String(expanded)); } return; } const action = target.closest<HTMLButtonElement>('[data-stage-action]'); const row = action?.closest<HTMLElement>('.stage-row'); if (!action || !row || action.disabled) return; syncCurrentFromForm(); const index = Number(row.dataset.index); if (action.classList.contains('move-up')) [current.stages[index - 1], current.stages[index]] = [current.stages[index], current.stages[index - 1]]; if (action.classList.contains('move-down')) [current.stages[index], current.stages[index + 1]] = [current.stages[index + 1], current.stages[index]]; if (action.classList.contains('remove-stage')) current.stages.splice(index, 1); saved = false; render(); });
+  document.querySelector('#stage-list')?.addEventListener('input', (event) => { const input = event.target as HTMLInputElement; const row = input.closest<HTMLElement>('.stage-row'); if (!row) return; if (input.dataset.field === 'color') { row.style.setProperty('--stage-color', input.value); const label = input.parentElement?.querySelector('span'); if (label) label.textContent = input.value; } if (input.dataset.field === 'name') { const element = row.querySelector<HTMLElement>('.stage-summary-name'); if (element) element.textContent = input.value || 'Untitled stage'; } if (input.dataset.field === 'threshold') { const element = row.querySelector<HTMLElement>('.stage-summary-threshold'); if (element) element.textContent = input.value || '00:00'; } });
+  document.querySelector('#local-play')?.addEventListener('click', () => { if (!activeRun) dispatch({ type: 'start', preset: configuredSnapshot() }); else dispatch({ type: activeRun.state === 'running' ? 'pause' : 'resume' }); });
+  document.querySelector('#local-reset')?.addEventListener('click', () => { dispatch({ type: 'reset' }); const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (overlay) overlay.hidden = true; document.body.classList.remove('live-open'); }); document.querySelector('#local-next-stage')?.addEventListener('click', () => dispatch({ type: 'next_stage' }));
+  document.querySelector('#device-connect')?.addEventListener('click', async () => { const button = document.querySelector<HTMLButtonElement>('#device-connect'); if (serial.status.state === 'connected') { manualDisconnect = true; await serial.disconnect(); return; } manualDisconnect = false; if (button) button.disabled = true; try { const recovered = await serial.reconnect(); if (!recovered) await serial.connect(); } catch { /* status UI contains the reason */ } finally { updateDeviceUi(serial.status); } });
+  document.querySelector('#device-ping')?.addEventListener('click', () => { void serial.ping().catch(() => undefined); });
 }
 
-function updateDeviceUi(status: SerialStatus): void { const badge = document.querySelector('#device-badge'); const state = document.querySelector('#device-state'); const connect = document.querySelector<HTMLButtonElement>('#device-connect'); const detail = document.querySelector('#device-detail'); if (!badge || !state || !connect) return; const connected = status.state === 'connected'; badge.className = `device-badge ${status.state}`; state.textContent = status.message; if (detail) { detail.textContent = status.firmware ? `Firmware ${status.firmware}` : 'Optional USB controller'; detail.classList.toggle('is-error', status.state === 'error'); } connect.disabled = status.state === 'connecting' || status.state === 'unsupported'; connect.title = connected ? 'Disconnect Arduino controller' : 'Connect an Arduino controller'; connect.setAttribute('aria-label', connect.title); connect.innerHTML = controllerConnectIcon; document.querySelectorAll<HTMLButtonElement>('[data-command], #send-config').forEach((button) => { button.disabled = status.state !== 'connected'; }); }
-function updateRuntime(message: DeviceMessage): void { if (message.type === 'error') { pendingDeviceTimer = undefined; updateTimerUi(); return; } if (message.type !== 'status') return; runtime = message as DeviceStatusMessage; if (pendingDeviceTimer && runtime.state === pendingDeviceTimer.state) pendingDeviceTimer = undefined; if (serial.status.state === 'connected' && !localTimerRunning) { localTimerElapsed = runtime.elapsed ?? 0; updateTimerUi(); } }
+function updateDeviceUi(status: SerialStatus): void { const badge = document.querySelector('#device-badge'); const state = document.querySelector('#device-state'); const connect = document.querySelector<HTMLButtonElement>('#device-connect'); const ping = document.querySelector<HTMLButtonElement>('#device-ping'); const detail = document.querySelector('#device-detail'); if (!badge || !state || !connect) return; badge.className = `device-badge ${status.state}`; state.textContent = status.message; if (detail) { detail.textContent = status.firmware ? `Firmware ${status.firmware}${status.ledCount ? ` · ${status.ledCount} LEDs` : ''}` : 'Optional USB controller'; detail.classList.toggle('is-error', Boolean(status.warning) || status.state === 'error'); } const connected = status.state === 'connected'; connect.disabled = status.state === 'connecting' || status.state === 'unsupported'; if (ping) ping.disabled = !connected; connect.title = connected ? 'Disconnect Arduino controller' : 'Reconnect Arduino controller'; connect.setAttribute('aria-label', connect.title); updateWarnings(); if (connected) { reconnectDelay = 250; if (reconnectTimer) window.clearTimeout(reconnectTimer); reconnectTimer = undefined; } else if (!manualDisconnect && status.state !== 'unsupported') scheduleReconnect(); }
+function scheduleReconnect(): void { if (reconnectTimer || manualDisconnect || serial.status.state === 'connected' || serial.status.state === 'connecting') return; reconnectTimer = window.setTimeout(async () => { reconnectTimer = undefined; try { if (await serial.reconnect()) reconnectDelay = 250; else reconnectDelay = Math.min(5000, reconnectDelay * 2); } catch { reconnectDelay = Math.min(5000, reconnectDelay * 2); } if (serial.status.state !== 'connected') scheduleReconnect(); }, reconnectDelay); }
+function handleDeviceMessage(message: DeviceMessage): void { if (message.type !== 'button' || message.button !== 'play_pause' && message.button !== 'next_stage') return; const sequence = typeof message.sequence === 'number' ? message.sequence : 0; if (sequence <= lastButtonSequence) return; lastButtonSequence = sequence; dispatch({ type: message.button === 'play_pause' ? (activeRun?.state === 'running' ? 'pause' : activeRun ? 'resume' : 'start') : 'next_stage', ...(message.button === 'play_pause' && !activeRun ? { preset: configuredSnapshot() } : {}) } as TimerAction); }
 
-serial.onStatus(updateDeviceUi); serial.onMessage(updateRuntime); render(); window.setTimeout(() => { if (serial.status.state === 'disconnected') void serial.reconnect().catch(() => undefined); }, 0); window.addEventListener('click', (event) => { const picker = document.querySelector('.preset-picker'); if (picker?.contains(event.target as Node)) return; const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (menu && toggle) { menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } }); window.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeLiveView(); }); registerSW({ immediate: true, onNeedRefresh: () => { document.body.dataset.updateWaiting = 'true'; } });
+serial.onStatus(updateDeviceUi); serial.onMessage(handleDeviceMessage); serial.onReady(() => { lastButtonSequence = 0; applyOutputs(true); });
+render();
+document.addEventListener('visibilitychange', () => { void syncWakeLock(); updateWarnings(); });
+window.addEventListener('click', (event) => { const picker = document.querySelector('.preset-picker'); if (picker?.contains(event.target as Node)) return; const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (menu && toggle) { menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } });
+window.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeLiveView(); });
+registerSW({ immediate: true, onNeedRefresh: () => { document.body.dataset.updateWaiting = 'true'; } });
