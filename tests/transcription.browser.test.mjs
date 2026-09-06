@@ -33,9 +33,9 @@ after(async () => {
   await server?.close();
 });
 
-async function openMockedTranscription({ restartAfterResult = false } = {}) {
+async function openMockedTranscription({ restartAfterResult = false, interimOnly = false, activeMeter = false } = {}) {
   const page = await browser.newPage();
-  await page.addInitScript(({ restartAfterResult }) => {
+  await page.addInitScript(({ restartAfterResult, interimOnly, activeMeter }) => {
     const state = window.__transcriptionTest = { events: [], starts: 0, meterStarts: 0, sharedTrackStarts: 0 };
 
     class FakeSpeechRecognitionPhrase {
@@ -77,9 +77,9 @@ async function openMockedTranscription({ restartAfterResult = false } = {}) {
           state.sharedTrackStarts += 1;
           if (this.instanceNumber !== 0) return;
           setTimeout(() => {
-            const result = { 0: { transcript: 'hello world' }, length: 1, isFinal: true };
+            const result = { 0: { transcript: 'hello world' }, length: 1, isFinal: !interimOnly };
             this.onresult?.({ resultIndex: 0, results: [result] });
-            this.onsoundend?.();
+            if (!interimOnly) this.onsoundend?.();
             if (restartAfterResult) setTimeout(() => this.onend?.(), 5);
           }, 5);
         });
@@ -90,14 +90,14 @@ async function openMockedTranscription({ restartAfterResult = false } = {}) {
     }
 
     class FakeAudioContext {
-      constructor() { this.state = 'suspended'; }
+      constructor() { this.state = activeMeter ? 'running' : 'suspended'; }
 
       createAnalyser() {
         return {
           fftSize: 1024,
           smoothingTimeConstant: 0,
           connect() {},
-          getFloatTimeDomainData(samples) { samples.fill(0.2); },
+          getFloatTimeDomainData(samples) { samples.fill(activeMeter ? 0.003 : 0.2); },
         };
       }
 
@@ -106,7 +106,7 @@ async function openMockedTranscription({ restartAfterResult = false } = {}) {
       get destination() { return {}; }
       // Deliberately never resolves: browser autoplay policy may suspend an
       // AudioContext until a user gesture, but recognition must still run.
-      resume() { return new Promise(() => {}); }
+      resume() { return activeMeter ? Promise.resolve() : new Promise(() => {}); }
       close() { return Promise.resolve(); }
     }
 
@@ -124,7 +124,7 @@ async function openMockedTranscription({ restartAfterResult = false } = {}) {
     Object.defineProperty(window, 'SpeechRecognitionPhrase', { configurable: true, value: FakeSpeechRecognitionPhrase });
     Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: mediaDevices });
-  }, { restartAfterResult });
+  }, { restartAfterResult, interimOnly, activeMeter });
   await page.goto(pageUrl);
   return page;
 }
@@ -153,5 +153,16 @@ test('an ended session restarts without duplicating its final result', async () 
   assert.equal(await page.textContent('#final-text'), 'Hello world.');
   assert.equal(await page.locator('.activity-item.transcript').count(), 1);
   assert.equal(await page.textContent('#status strong'), 'Listening');
+  await page.close();
+});
+
+test('sustained faint input endpoints and preserves pending interim text', async () => {
+  const page = await openMockedTranscription({ interimOnly: true, activeMeter: true });
+  await page.waitForFunction(() => document.querySelector('#interim-text')?.textContent === 'hello world');
+  await page.waitForFunction(() => document.querySelector('#final-text')?.textContent === 'Hello world.', null, { timeout: 3000 });
+  await page.waitForFunction(() => window.__transcriptionTest.starts >= 2);
+
+  assert.equal(await page.textContent('#interim-text'), '');
+  assert.equal(await page.locator('.activity-item.transcript').count(), 1);
   await page.close();
 });

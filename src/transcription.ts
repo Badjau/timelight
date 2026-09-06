@@ -102,6 +102,14 @@ let meterFrame: number | undefined;
 let quietSince: number | null = null;
 let quietEventRecorded = false;
 let recognitionSoundActive = false;
+let latestInterimText = '';
+let silenceEndpointRequested = false;
+
+// Ignore faint room/electrical noise when deciding whether a phrase is still
+// active. Web Speech does not expose an end-of-speech sensitivity control, so
+// the input meter supplies a more decisive local endpoint for pending text.
+const speechLevelThreshold = 25;
+const silenceEndpointDelay = 1100;
 
 const fillerPhrases = ['um', 'uh', 'erm', 'hmm', 'you know', 'I mean', 'sort of', 'kind of'];
 const speechPhrases = [''];
@@ -130,6 +138,14 @@ function commitSession(): void {
   committedText = joinText(committedText, sessionFinalText);
   sessionFinalText = '';
   renderTranscript();
+}
+
+function preservePendingInterim(): void {
+  const punctuated = punctuateFinalResult(latestInterimText);
+  latestInterimText = '';
+  if (!punctuated) return;
+  sessionFinalText = joinText(sessionFinalText, punctuated);
+  addActivity('transcript', punctuated);
 }
 
 function punctuateFinalResult(text: string): string {
@@ -215,15 +231,23 @@ function updateMeter(): void {
   microphoneMeter.setAttribute('aria-valuenow', String(Math.round(level)));
 
   const now = performance.now();
-  const quietThreshold = 10;
-  if (shouldListen && recognitionSoundActive && level < quietThreshold) quietSince ??= now;
+  if (shouldListen && recognitionSoundActive && level < speechLevelThreshold) quietSince ??= now;
   else {
     quietSince = null;
     quietEventRecorded = false;
   }
+  if (
+    quietSince !== null
+    && now - quietSince >= silenceEndpointDelay
+    && latestInterimText
+    && !silenceEndpointRequested
+  ) {
+    silenceEndpointRequested = true;
+    recognition?.stop();
+  }
   const isQuiet = quietSince !== null && now - quietSince >= 2500;
   quietWarning.hidden = !isQuiet;
-  microphoneLabel.textContent = isQuiet ? 'Very quiet' : recognitionSoundActive && level >= 92 ? 'Too loud' : recognitionSoundActive && level >= quietThreshold ? 'Good level' : 'Listening for speech';
+  microphoneLabel.textContent = isQuiet ? 'Very quiet' : recognitionSoundActive && level >= 92 ? 'Too loud' : recognitionSoundActive && level >= speechLevelThreshold ? 'Good level' : 'Listening for speech';
   if (isQuiet && !quietEventRecorded) {
     addActivity('quiet', 'Speech was detected while the microphone level was very low.');
     quietEventRecorded = true;
@@ -291,6 +315,7 @@ function stopInputMeter(): void {
   quietSince = null;
   quietEventRecorded = false;
   recognitionSoundActive = false;
+  silenceEndpointRequested = false;
   quietWarning.hidden = true;
   microphoneLevel.style.transform = 'scaleX(0)';
   microphoneMeter.setAttribute('aria-valuenow', '0');
@@ -314,6 +339,7 @@ function configureRecognition(): SpeechRecognitionLike {
   applyVocabularyBias(instance);
   const finalizedResults = new Set<number>();
   let sessionErrorMessage: string | null = null;
+  silenceEndpointRequested = false;
 
   instance.onstart = () => {
     if (recognition !== instance) return;
@@ -362,6 +388,7 @@ function configureRecognition(): SpeechRecognitionLike {
       }
     }
     sessionFinalText = sessionFinal;
+    latestInterimText = interim;
     renderTranscript(interim);
   };
 
@@ -390,6 +417,7 @@ function configureRecognition(): SpeechRecognitionLike {
     recognition = null;
     recognitionSoundActive = false;
     starting = false;
+    preservePendingInterim();
     commitSession();
     if (shouldListen) {
       setStatus(sessionErrorMessage ? 'error' : 'idle', sessionErrorMessage ? `${sessionErrorMessage} Retrying…` : 'Restarting recognition…');
@@ -445,7 +473,6 @@ function stopRecognition(): void {
   starting = false;
   window.clearTimeout(restartTimer);
   recognition?.stop();
-  recognition = null;
   stopInputMeter();
   setStatus('idle', 'Not listening');
   toggle.textContent = 'Start listening';
@@ -490,6 +517,7 @@ expectedNames.addEventListener('change', () => {
 clear.addEventListener('click', () => {
   committedText = '';
   sessionFinalText = '';
+  latestInterimText = '';
   activityLog.replaceChildren();
   activityPlaceholder.hidden = false;
   listeningStartedAt = shouldListen ? performance.now() : null;
