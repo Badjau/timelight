@@ -83,7 +83,10 @@ function nextRun(preset: PresetSnapshot, clock: TimerClock): TimerRun {
 
 export function reduceTimer(previous: TimerRun | null, action: TimerAction, clock: TimerClock): TimerActionResult {
   if (action.type === 'reset') return { run: null, stageChanged: Boolean(previous), chime: false };
-  if (action.type === 'start') return { run: nextRun(action.preset, clock), stageChanged: true, chime: false };
+  if (action.type === 'start') {
+    const run = nextRun(action.preset, clock);
+    return { run, stageChanged: true, chime: run.preset.stages[0]?.buzzer === 'once' };
+  }
   if (!previous) return { run: previous, stageChanged: false, chime: false };
 
   const beforeStage = Number.isFinite(previous.lastEffectiveStageIndex) ? previous.lastEffectiveStageIndex : effectiveStage(previous, clock);

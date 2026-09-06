@@ -43,6 +43,22 @@ test('next stage is a manual override and reset clears the run', () => {
   assert.equal(result.run, null);
 });
 
+test('one-shot alerts fire for the first stage and each later configured stage', () => {
+  const chimePreset = { name: 'Chimes', speaker: '', duration: 30, stages: [
+    { name: 'one', threshold: 0, color: '#0000ff', buzzer: 'once' },
+    { name: 'two', threshold: 5, color: '#00ff00', buzzer: 'once' },
+    { name: 'three', threshold: 10, color: '#ff7b00', buzzer: 'once' },
+    { name: 'four', threshold: 20, color: '#ff0000', buzzer: 'repeat' },
+  ] };
+  let result = timer.reduceTimer(null, { type: 'start', preset: chimePreset }, at(0));
+  assert.equal(result.chime, true);
+  result = timer.reduceTimer(result.run, { type: 'tick' }, at(5000));
+  assert.equal(result.chime, true);
+  result = timer.reduceTimer(result.run, { type: 'tick' }, at(10000));
+  assert.equal(result.chime, true);
+  assert.equal(timer.effectiveStage(result.run, at(10000)), 2);
+});
+
 test('refresh recovery uses wall time and clamps backward-clock anomalies', () => {
   let result = timer.reduceTimer(null, { type: 'start', preset }, at(1000));
   result = timer.reduceTimer(result.run, { type: 'tick' }, at(4000));

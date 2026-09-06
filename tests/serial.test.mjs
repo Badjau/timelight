@@ -106,6 +106,19 @@ test('a one-shot chime can be sequenced after the stage output snapshot', async 
   await serial.disconnect();
 });
 
+test('a one-shot chime is encoded atomically in its stage output revision', async () => {
+  const fake = fakePort();
+  const serial = new serialModule.ArduinoSerial({ async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } });
+  await serial.connect();
+  await serial.setOutputs({ revision: 3, color: '#ff7b00', ledEffect: 'solid', transitionMs: 1000, animationState: 'playing', buzzerMode: 'once' });
+  const output = fake.writes.filter((message) => message.type === 'set_outputs').at(-1);
+  assert.equal(output.revision, 3);
+  assert.equal(output.color, '#ff7b00');
+  assert.equal(output.buzzerMode, 'once');
+  assert.equal(fake.writes.some((message) => message.type === 'buzz_once'), false);
+  await serial.disconnect();
+});
+
 test('a missed one-shot chime retries safely with the same event id', async () => {
   const fake = fakePort({ retryBuzz: true });
   const api = { async requestPort() { return fake.port; }, async getPorts() { return [fake.port]; } };

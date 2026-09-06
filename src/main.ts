@@ -73,14 +73,12 @@ function configuredSnapshot(): PresetSnapshot { syncCurrentFromForm(); return { 
 function dispatch(action: TimerAction): void {
   const before = activeRun; const result = reduceTimer(activeRun, action, clock()); activeRun = result.run; persistRun();
   const transitionMs = action.type === 'start' ? 300 : result.stageChanged ? 1000 : action.type === 'reset' ? 0 : 0;
-  const outputTask = applyOutputs(action.type === 'start' || result.stageChanged || action.type === 'reset', transitionMs);
-  if (result.run && result.chime) { const eventId = `${result.run.runId}:${effectiveStage(result.run, clock())}`; void outputTask.then(() => serial.buzzOnce(eventId)).catch(() => undefined); }
-  else void outputTask.catch(() => undefined);
+  void applyOutputs(action.type === 'start' || result.stageChanged || action.type === 'reset', transitionMs, result.chime).catch(() => undefined);
   updateTimerUi(); syncTimerLoop(); void syncWakeLock();
   if (action.type === 'start' && !before) { const overlay = document.querySelector<HTMLElement>('#live-overlay'); if (overlay) overlay.hidden = false; document.body.classList.add('live-open'); }
 }
 function outputChanged(a: ReturnType<typeof deriveOutputs>, b: ReturnType<typeof deriveOutputs>): boolean { return a.color !== b.color || a.ledEffect !== b.ledEffect || a.animationState !== b.animationState || a.buzzerMode !== b.buzzerMode; }
-function applyOutputs(force: boolean, transitionMs = 0): Promise<void> { const next = deriveOutputs(activeRun, clock()); if (!force && !outputChanged(next, lastOutputs)) return Promise.resolve(); outputRevision++; lastOutputs = next; return serial.setOutputs({ ...next, transitionMs, revision: outputRevision }); }
+function applyOutputs(force: boolean, transitionMs = 0, chime = false): Promise<void> { const next = deriveOutputs(activeRun, clock()); if (!force && !outputChanged(next, lastOutputs)) return Promise.resolve(); outputRevision++; lastOutputs = next; return serial.setOutputs({ ...next, buzzerMode: chime ? 'once' : next.buzzerMode, transitionMs, revision: outputRevision }); }
 function savePreset(): void { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } current.updatedAt = new Date().toISOString(); const existing = presets.findIndex((preset) => preset.id === current.id); if (existing >= 0) presets[existing] = structuredClone(current); else presets.unshift(structuredClone(current)); persistPresets(); revertTarget = structuredClone(current); saved = true; render(); }
 async function sendPreset(): Promise<void> {
   syncCurrentFromForm();

@@ -1,6 +1,6 @@
 # TimeLight Arduino controller
 
-`TimeLightController.ino` is the standalone-capable binary protocol-v4 controller (firmware 0.5.0). An active browser lease owns all timing and outputs. With no browser owner, the controller runs its stored preset from the physical buttons.
+`TimeLightController.ino` is the standalone-capable binary protocol-v4 controller (firmware 0.5.3). An active browser lease owns all timing and outputs. With no browser owner, the controller runs its stored preset from the physical buttons.
 
 ## Wiring
 

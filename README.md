@@ -23,7 +23,7 @@ Use desktop Chrome or Microsoft Edge over the HTTPS production origin. A handsha
 
 See [`docs/serial-protocol.md`](docs/serial-protocol.md) and [`arduino/README.md`](arduino/README.md) for the complete protocol and upload instructions.
 
-Protocol v4 requires firmware 0.5.0 and the matching website. Connection lifecycle and errors appear in DevTools with a `[TimeLight serial]` prefix. Set `localStorage['timelight-serial-debug'] = '1'` and reload to include per-frame summaries.
+Protocol v4 requires firmware 0.5.3 and the matching website. Connection lifecycle and errors appear in DevTools with a `[TimeLight serial]` prefix. Set `localStorage['timelight-serial-debug'] = '1'` and reload to include per-frame summaries.
 
 ### Nano LED transition troubleshooting
 

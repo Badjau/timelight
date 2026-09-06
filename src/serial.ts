@@ -6,11 +6,10 @@ const MAX_WIRE_FRAME = 96;
 
 export type SerialConnectionState = 'unsupported' | 'disconnected' | 'connecting' | 'connected' | 'error';
 export type LedEffect = 'off' | 'solid' | 'blink';
-export type BuzzerMode = 'none' | 'repeat';
 export type ControllerBuzzerMode = 'none' | 'once' | 'repeat';
 export type ControllerStage = { threshold: number; color: string; blink: boolean; buzzer: ControllerBuzzerMode };
 export type ControllerPreset = { duration: number; stages: ControllerStage[] };
-export type OutputSnapshot = { revision: number; color: string; ledEffect: LedEffect; transitionMs: number; animationState: 'playing' | 'paused'; buzzerMode: BuzzerMode };
+export type OutputSnapshot = { revision: number; color: string; ledEffect: LedEffect; transitionMs: number; animationState: 'playing' | 'paused'; buzzerMode: ControllerBuzzerMode };
 export type DeviceMessage = { version?: number; type?: string; requestId?: number; [key: string]: unknown };
 export type ReadyMessage = DeviceMessage & { type: 'ready'; firmware?: string; ledCount?: number; buttons?: string[]; capabilities?: string[] };
 export type ButtonMessage = DeviceMessage & { type: 'button'; button?: string; sequence?: number };
@@ -44,7 +43,7 @@ function payloadFor(message: DeviceMessage): Uint8Array {
   if (message.type === 'ack') { const out = new Uint8Array(4); put32(new DataView(out.buffer), 0, Number(message.appliedRevision) || 0); return out; }
   if (message.type === 'error') return Uint8Array.of(Number(message.errorCode) || 1);
   if (message.type === 'button') { const out = new Uint8Array(5); out[0] = message.button === 'play_pause' ? 1 : message.button === 'next_stage' ? 2 : 3; put32(new DataView(out.buffer), 1, Number(message.sequence) || 0); return out; }
-  if (message.type === 'set_outputs') { const out = new Uint8Array(18); const view = new DataView(out.buffer); const color = colorNumber(message.color); put32(view, 0, session); put32(view, 4, Number(message.revision)); out[8] = color >> 16; out[9] = color >> 8; out[10] = color; out[11] = effects.indexOf(message.ledEffect as LedEffect); put16(view, 12, Number(message.transitionMs)); out[14] = message.animationState === 'playing' ? 1 : 0; out[15] = message.buzzerMode === 'repeat' ? 2 : 0; put16(view, 16, Number(message.leaseMs)); return out; }
+  if (message.type === 'set_outputs') { const out = new Uint8Array(18); const view = new DataView(out.buffer); const color = colorNumber(message.color); put32(view, 0, session); put32(view, 4, Number(message.revision)); out[8] = color >> 16; out[9] = color >> 8; out[10] = color; out[11] = effects.indexOf(message.ledEffect as LedEffect); put16(view, 12, Number(message.transitionMs)); out[14] = message.animationState === 'playing' ? 1 : 0; out[15] = buzzers.indexOf(message.buzzerMode as ControllerBuzzerMode); put16(view, 16, Number(message.leaseMs)); return out; }
   if (message.type === 'buzz_once') { const out = new Uint8Array(8); const view = new DataView(out.buffer); put32(view, 0, session); put32(view, 4, typeof message.eventId === 'number' ? message.eventId : eventHash(String(message.eventId))); return out; }
   if (message.type === 'store_preset') { const stages = message.stages as Array<[number, string, boolean, ControllerBuzzerMode]>; const out = new Uint8Array(9 + stages.length * 8); const view = new DataView(out.buffer); put32(view, 0, session); put32(view, 4, Number(message.duration)); out[8] = stages.length; stages.forEach(([threshold, color, blink, buzzer], index) => { const offset = 9 + index * 8, parsed = colorNumber(color); put32(view, offset, threshold); out[offset + 4] = parsed >> 16; out[offset + 5] = parsed >> 8; out[offset + 6] = parsed; out[offset + 7] = (blink ? 4 : 0) | buzzers.indexOf(buzzer); }); return out; }
   return new Uint8Array();
@@ -58,7 +57,7 @@ export function decodeWireMessage(encoded: Uint8Array): DeviceMessage | null {
   else if (type === 'ack' && p.length === 4) message.appliedRevision = pv.getUint32(0, true);
   else if (type === 'error' && p.length === 1) { message.errorCode = p[0]; message.message = errorMessages[p[0]] ?? 'Controller rejected the command'; }
   else if (type === 'button' && p.length === 5) { message.button = p[0] === 1 ? 'play_pause' : p[0] === 2 ? 'next_stage' : 'reset'; message.sequence = pv.getUint32(1, true); }
-  else if (type === 'set_outputs' && p.length === 18) { message.sessionId = pv.getUint32(0, true); message.revision = pv.getUint32(4, true); message.color = colorText(p[8] << 16 | p[9] << 8 | p[10]); message.ledEffect = effects[p[11]]; message.transitionMs = pv.getUint16(12, true); message.animationState = p[14] ? 'playing' : 'paused'; message.buzzerMode = p[15] === 2 ? 'repeat' : 'none'; message.leaseMs = pv.getUint16(16, true); }
+  else if (type === 'set_outputs' && p.length === 18) { message.sessionId = pv.getUint32(0, true); message.revision = pv.getUint32(4, true); message.color = colorText(p[8] << 16 | p[9] << 8 | p[10]); message.ledEffect = effects[p[11]]; message.transitionMs = pv.getUint16(12, true); message.animationState = p[14] ? 'playing' : 'paused'; message.buzzerMode = buzzers[p[15]]; message.leaseMs = pv.getUint16(16, true); }
   else if (type === 'buzz_once' && p.length === 8) { message.sessionId = pv.getUint32(0, true); message.eventId = pv.getUint32(4, true); }
   else if (type === 'store_preset' && p.length >= 9 && p.length === 9 + p[8] * 8) { message.sessionId = pv.getUint32(0, true); message.duration = pv.getUint32(4, true); message.stages = Array.from({ length: p[8] }, (_, index) => { const offset = 9 + index * 8, flags = p[offset + 7]; return [pv.getUint32(offset, true), colorText(p[offset + 4] << 16 | p[offset + 5] << 8 | p[offset + 6]), Boolean(flags & 4), buzzers[flags & 3]]; }); }
   else if (p.length || !['ping', 'pong'].includes(type)) return null; return message;

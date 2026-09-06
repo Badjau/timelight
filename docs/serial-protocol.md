@@ -1,6 +1,6 @@
 # TimeLight serial protocol v4
 
-Protocol v4 is a compact binary protocol for firmware 0.5.0. The website and controller must be upgraded together; protocol-v3 JSON firmware cannot parse v4 frames.
+Protocol v4 is a compact binary protocol for firmware 0.5.3. The website and controller must be upgraded together; protocol-v3 JSON firmware cannot parse v4 frames.
 
 ## Framing
 
@@ -45,7 +45,7 @@ The `ready` button bits are play/pause, next stage, and reset in bits 0-2. Capab
 
 `set_outputs` has an 18-byte payload: session ID `u32`, revision `u32`, RGB color `u8x3`, LED effect `u8`, transition milliseconds `u16`, animation state `u8`, buzzer mode `u8`, and buzzer lease milliseconds `u16`.
 
-LED effects are off `0`, solid `1`, and blink `2`. Animation is paused `0` or playing `1`. Browser output buzzer mode is none `0` or repeat `2`. Revisions and one-shot event IDs make retries idempotent.
+LED effects are off `0`, solid `1`, and blink `2`. Animation is paused `0` or playing `1`. Output buzzer mode is none `0`, once `1`, or repeat `2`. A once alert is tied to its output revision, so a retry is idempotent. The dedicated `buzz_once` frame remains supported for compatibility and uses its event ID for idempotence.
 
 ## Standalone preset storage
 
