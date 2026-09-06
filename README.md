@@ -17,6 +17,8 @@ npm run dev
 
 Check the production build locally with `npm run build` and `npm run preview`; open `/timelight/` in the preview.
 
+An unlinked, experimental SpeechRecognition test is available at `/timelight/admin/transcription/`. It requests microphone access, displays interim and final text live, and does not save audio or transcripts.
+
 ## Arduino connection
 
 Use desktop Chrome or Microsoft Edge over the HTTPS production origin. A handshake gives the browser exclusive control and immediately cancels any standalone run. Manual disconnect releases the controller idle/off at once; unexpected loss does so after the three-second keepalive lease and then advertises readiness for recovery. Offline, Play/Pause starts or pauses the stored preset, short Next advances on release, and a three-second Next hold resets. During browser ownership those gestures are routed to the website instead. The default strip is 116 WS2812 LEDs on D6; the buzzer is D7, play/pause is D4, and next-stage is D5. Some Nano variants use a CH340 USB-to-serial chip and may need an operating-system driver.

@@ -3,6 +3,14 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   base: '/timelight/',
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        transcription: 'admin/transcription/index.html',
+      },
+    },
+  },
   plugins: [
     VitePWA({
       registerType: 'prompt',

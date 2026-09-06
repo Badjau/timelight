@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08111f" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/svg+xml" href="/timelight/favicon.svg" />
+    <title>Speech Recognition Test · TimeLight</title>
+  </head>
+  <body>
+    <main class="test-shell">
+      <header>
+        <p class="eyebrow">TimeLight admin test</p>
+        <h1>Live speech recognition</h1>
+        <p class="note">Uses the browser SpeechRecognition API. Audio and text are not saved by TimeLight.</p>
+      </header>
+
+      <section class="controls" aria-label="Speech recognition controls">
+        <button id="toggle" type="button">Start listening</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+        <button id="copy" class="secondary" type="button">Copy text</button>
+        <label>
+          Language
+          <select id="language">
+            <option value="en-US">English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="zh-CN">Chinese (Simplified)</option>
+            <option value="zh-HK">Chinese (Hong Kong)</option>
+            <option value="ja-JP">Japanese</option>
+          </select>
+        </label>
+      </section>
+
+      <div id="status" class="status idle" role="status" aria-live="polite">
+        <span aria-hidden="true"></span><strong>Preparing microphone…</strong>
+      </div>
+
+      <section class="transcript" aria-label="Live transcript" aria-live="polite">
+        <div id="final-text"></div>
+        <div id="interim-text" class="interim"></div>
+        <p id="placeholder" class="placeholder">Speech will appear here.</p>
+      </section>
+
+      <p id="support-note" class="support-note" hidden></p>
+    </main>
+    <script type="module" src="/src/transcription.ts"></script>
+  </body>
+</html>
