@@ -66,7 +66,8 @@ let recognition: SpeechRecognitionLike | null = null;
 let shouldListen = false;
 let starting = false;
 let restartTimer: number | undefined;
-let finalized = '';
+let committedText = '';
+let sessionFinalText = '';
 
 function setStatus(kind: 'idle' | 'listening' | 'error', message: string): void {
   status.className = `status ${kind}`;
@@ -75,9 +76,15 @@ function setStatus(kind: 'idle' | 'listening' | 'error', message: string): void 
 }
 
 function renderTranscript(interim = ''): void {
-  finalText.textContent = finalized;
+  finalText.textContent = [committedText, sessionFinalText].filter(Boolean).join(' ');
   interimText.textContent = interim;
-  placeholder.hidden = Boolean(finalized || interim);
+  placeholder.hidden = Boolean(committedText || sessionFinalText || interim);
+}
+
+function commitSession(): void {
+  committedText = [committedText, sessionFinalText].filter(Boolean).join(' ').trim();
+  sessionFinalText = '';
+  renderTranscript();
 }
 
 function configureRecognition(): SpeechRecognitionLike {
@@ -95,17 +102,21 @@ function configureRecognition(): SpeechRecognitionLike {
   };
 
   instance.onresult = (event) => {
+    let sessionFinal = '';
     let interim = '';
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+    // SpeechRecognition results are a revisable list, not a stream of new text.
+    // Rebuild the active session so repeated revisions are never appended twice.
+    for (let index = 0; index < event.results.length; index += 1) {
       const result = event.results[index];
-      const text = result?.[0]?.transcript ?? '';
+      const text = (result?.[0]?.transcript ?? '').trim();
       if (result?.isFinal) {
-        finalized += `${text.trim()} `;
+        sessionFinal = [sessionFinal, text].filter(Boolean).join(' ');
       } else {
-        interim += text;
+        interim = [interim, text].filter(Boolean).join(' ');
       }
     }
-    renderTranscript(interim.trim());
+    sessionFinalText = sessionFinal;
+    renderTranscript(interim);
   };
 
   instance.onerror = (event) => {
@@ -125,6 +136,7 @@ function configureRecognition(): SpeechRecognitionLike {
 
   instance.onend = () => {
     starting = false;
+    commitSession();
     if (shouldListen) {
       setStatus('idle', 'Restarting recognition…');
       restartTimer = window.setTimeout(startRecognition, 250);
@@ -190,13 +202,16 @@ language.addEventListener('change', () => {
 });
 
 clear.addEventListener('click', () => {
-  finalized = '';
+  committedText = '';
+  sessionFinalText = '';
   renderTranscript();
+  if (shouldListen) recognition?.abort();
 });
 
 copy.addEventListener('click', async () => {
-  if (!finalized.trim()) return;
-  await navigator.clipboard.writeText(finalized.trim());
+  const transcript = [committedText, sessionFinalText].filter(Boolean).join(' ').trim();
+  if (!transcript) return;
+  await navigator.clipboard.writeText(transcript);
   copy.textContent = 'Copied';
   window.setTimeout(() => { copy.textContent = 'Copy text'; }, 1200);
 });
