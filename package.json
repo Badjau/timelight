@@ -7,9 +7,12 @@
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
     "preview": "vite preview",
-    "test": "node --test tests/timer.test.mjs tests/serial.test.mjs"
+    "test": "node --test tests/timer.test.mjs tests/serial.test.mjs tests/transcription.browser.test.mjs",
+    "test:transcription": "node --test tests/transcription.browser.test.mjs",
+    "test:transcription:smoke": "node scripts/transcription-smoke.mjs"
   },
   "devDependencies": {
+    "playwright-core": "^1.55.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.14",
     "vite-plugin-pwa": "^0.21.1"

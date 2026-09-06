@@ -30,16 +30,44 @@
             <option value="ja-JP">Japanese</option>
           </select>
         </label>
+        <label class="vocabulary-field">
+          Expected names
+          <input id="expected-names" type="text" autocomplete="off" placeholder="Speaker or organization names, comma-separated" />
+        </label>
       </section>
 
       <div id="status" class="status idle" role="status" aria-live="polite">
         <span aria-hidden="true"></span><strong>Preparing microphone…</strong>
       </div>
 
+      <section class="input-quality" aria-labelledby="input-quality-title">
+        <div class="quality-heading">
+          <h2 id="input-quality-title">Microphone level</h2>
+          <strong id="microphone-label">Waiting for microphone</strong>
+        </div>
+        <div id="microphone-meter" class="meter" role="meter" aria-label="Microphone input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <span id="microphone-level"></span>
+        </div>
+        <p id="quiet-warning" class="quiet-warning" role="status" hidden>Speech may be too quiet. Move closer to the microphone or increase its input level.</p>
+        <p id="bias-note" class="bias-note">Expected filler words and speech terminology will be moderately favored when the browser supports contextual biasing.</p>
+      </section>
+
       <section class="transcript" aria-label="Live transcript" aria-live="polite">
         <div id="final-text"></div>
         <div id="interim-text" class="interim"></div>
         <p id="placeholder" class="placeholder">Speech will appear here.</p>
+      </section>
+
+      <section class="activity" aria-labelledby="activity-title">
+        <div class="activity-heading">
+          <div>
+            <p class="eyebrow">Speech analysis</p>
+            <h2 id="activity-title">Timestamped activity</h2>
+          </div>
+          <p>Recognition and input-quality events are recorded separately from the transcript.</p>
+        </div>
+        <ol id="activity-log" aria-live="polite"></ol>
+        <p id="activity-placeholder" class="activity-placeholder">Activity will appear while you speak.</p>
       </section>
 
       <p id="support-note" class="support-note" hidden></p>
