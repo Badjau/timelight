@@ -53,6 +53,7 @@ let historyPreset = '';
 let historySort: { key: 'startedAt' | 'presetTitle' | 'stoppedAt'; direction: 'asc' | 'desc' } = { key: 'startedAt', direction: 'desc' };
 let historyDateFrom = '';
 let historyDateTo = '';
+let historySearchRefreshTimer: number | undefined;
 let current: Preset = structuredClone(presets[0] ?? starter);
 let revertTarget: Preset = structuredClone(current);
 // Keep this as the stage object, rather than its array index, so reordering a
@@ -83,9 +84,9 @@ function stageMarkup(stage: Stage, index: number): string { const last = index =
 function deviceStatusMarkup(): string { const status = serial.status; const connected = status.state === 'connected'; const label = connected ? 'Disconnect Arduino controller' : 'Reconnect Arduino controller'; return `<div class="controller-strip" id="controller-strip" aria-label="Arduino controller status"><span class="device-badge ${status.state}" id="device-badge"><i></i><span id="device-state">${escapeHtml(status.message)}</span></span><span id="device-detail" class="${status.warning ? 'is-error' : ''}">${status.firmware ? `Firmware ${escapeHtml(status.firmware)}` : 'Optional USB controller'}</span><button type="button" class="text-button" id="device-ping" title="Check controller health" ${connected ? '' : 'disabled'}>Check</button><button type="button" class="text-button controller-connect" id="device-connect" title="${label}" aria-label="${label}" ${status.state === 'connecting' || status.state === 'unsupported' ? 'disabled' : ''}>${controllerConnectIcon}</button></div>`; }
 
 function displayedHistory(): HistoryEntry[] { const q = historySearch.trim().toLowerCase(); const from = historyDateFrom ? Date.parse(historyDateFrom) : -Infinity; const to = historyDateTo ? Date.parse(historyDateTo) : Infinity; return history.filter((item) => { const started = item.startedAt ?? Date.parse(item.savedAt); return (!q || item.presetTitle.toLowerCase().includes(q) || item.speaker.toLowerCase().includes(q)) && (!historyPreset || item.presetTitle === historyPreset) && started >= from && started <= to; }).sort((a, b) => { const av = historySort.key === 'presetTitle' ? a.presetTitle.toLowerCase() : historySort.key === 'stoppedAt' ? a.stoppedAt : (a.startedAt ?? Date.parse(a.savedAt)); const bv = historySort.key === 'presetTitle' ? b.presetTitle.toLowerCase() : historySort.key === 'stoppedAt' ? b.stoppedAt : (b.startedAt ?? Date.parse(b.savedAt)); return (av < bv ? -1 : av > bv ? 1 : 0) * (historySort.direction === 'asc' ? 1 : -1); }); }
-function historyRowsMarkup(): string { const rows = displayedHistory(); return rows.length ? rows.map((item) => `<tr><td>${escapeHtml(item.presetTitle)}</td><td>${escapeHtml(item.speaker)}</td><td>${item.startedAt ? new Date(item.startedAt).toLocaleString() : '—'}</td><td>${formatTime(item.duration)}</td><td>${formatTime(item.stoppedAt)}</td><td>${formatVariance(item.variance)}</td><td><span class="result-badge" style="--result-color:${/^#[0-9a-f]{6}$/i.test(item.resultColor ?? '') ? item.resultColor : '#71859e'}">${escapeHtml(item.result)}</span></td><td><button type="button" class="text-button history-delete" data-history-id="${item.id}">Delete</button></td></tr>`).join('') : '<tr><td colspan="8" class="history-empty">No matching timers.</td></tr>'; }
+function historyRowsMarkup(rows = displayedHistory()): string { return rows.length ? rows.map((item) => `<tr><td>${escapeHtml(item.presetTitle)}</td><td>${escapeHtml(item.speaker)}</td><td>${item.startedAt ? new Date(item.startedAt).toLocaleString() : '—'}</td><td>${formatTime(item.duration)}</td><td>${formatTime(item.stoppedAt)}</td><td>${formatVariance(item.variance)}</td><td><span class="result-badge" style="--result-color:${/^#[0-9a-f]{6}$/i.test(item.resultColor ?? '') ? item.resultColor : '#71859e'}">${escapeHtml(item.result)}</span></td><td><button type="button" class="text-button history-delete" data-history-id="${item.id}">Delete</button></td></tr>`).join('') : '<tr><td colspan="8" class="history-empty">No matching timers.</td></tr>'; }
 function historyModalMarkup(): string { const presetsInHistory = [...new Set(history.map((item) => item.presetTitle))].sort(); const arrow = (key: typeof historySort.key) => historySort.key === key ? (historySort.direction === 'asc' ? ' ▲' : ' ▼') : ''; return `<div class="history-overlay" id="history-overlay" ${historyOpen ? '' : 'hidden'}><section class="history-card" role="dialog" aria-modal="true" aria-labelledby="history-title"><header><div><h2 id="history-title">Timer History</h2><div class="history-filters"><input id="history-search" type="search" placeholder="Search preset title or speaker name" value="${escapeHtml(historySearch)}"><select id="history-preset"><option value="">All presets</option>${presetsInHistory.map((p) => `<option ${p === historyPreset ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')} </select><label>From <input id="history-date-from" type="datetime-local" value="${escapeHtml(historyDateFrom)}"></label><label>To <input id="history-date-to" type="datetime-local" value="${escapeHtml(historyDateTo)}"></label></div></div><button type="button" class="history-close" id="history-close" aria-label="Close history">&times;</button></header><div class="history-table-wrap"><table><thead><tr><th><button data-history-sort="presetTitle">Preset title${arrow('presetTitle')}</button></th><th>Speaker name</th><th><button data-history-sort="startedAt">Start date & time${arrow('startedAt')}</button></th><th>Total duration</th><th><button data-history-sort="stoppedAt">Stop time${arrow('stoppedAt')}</button></th><th>Time remaining</th><th>Result</th><th>Action</th></tr></thead><tbody>${historyRowsMarkup()}</tbody></table></div><footer><span>${displayedHistory().length} of ${history.length} entries</span><button type="button" class="secondary-button" id="export-history" ${displayedHistory().length ? '' : 'disabled'}>Export CSV</button></footer></section></div>`; }
-function refreshHistoryContents(): void { const tbody = document.querySelector<HTMLTableSectionElement>('#history-overlay tbody'); if (tbody) tbody.innerHTML = historyRowsMarkup(); const footer = document.querySelector<HTMLElement>('#history-overlay footer'); if (footer) footer.innerHTML = `<span>${displayedHistory().length} of ${history.length} entries</span><button type="button" class="secondary-button" id="export-history" ${displayedHistory().length ? '' : 'disabled'}>Export CSV</button>`; bindHistoryEvents(); }
+function refreshHistoryContents(): void { const rows = displayedHistory(); const tbody = document.querySelector<HTMLTableSectionElement>('#history-overlay tbody'); if (tbody) tbody.innerHTML = historyRowsMarkup(rows); const footer = document.querySelector<HTMLElement>('#history-overlay footer'); if (footer) footer.innerHTML = `<span>${rows.length} of ${history.length} entries</span><button type="button" class="secondary-button" id="export-history" ${rows.length ? '' : 'disabled'}>Export CSV</button>`; }
 
 function render(): void {
   const timerPreset = activeRun?.preset ?? current; const name = timerPreset.name || 'Untitled preset'; const speaker = speakerName(timerPreset);
@@ -235,17 +236,30 @@ function exportHistoryCsv(): void {
   const blob = new Blob([`\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
   const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `timelight-history-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
 }
-function closeHistory(): void { historyOpen = false; const modal = document.querySelector<HTMLElement>('#history-overlay'); if (modal) modal.hidden = true; }
+function closeHistory(): void { historyOpen = false; if (historySearchRefreshTimer !== undefined) { window.clearTimeout(historySearchRefreshTimer); historySearchRefreshTimer = undefined; } const modal = document.querySelector<HTMLElement>('#history-overlay'); if (modal) modal.hidden = true; }
 function bindHistoryEvents(): void {
-  document.querySelector('#history-close')?.addEventListener('click', closeHistory);
-  document.querySelector('#history-overlay')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeHistory(); });
-  document.querySelector('#export-history')?.addEventListener('click', exportHistoryCsv);
-  document.querySelector<HTMLInputElement>('#history-search')?.addEventListener('input', (e) => { historySearch = (e.target as HTMLInputElement).value; refreshHistoryContents(); });
+  const overlay = document.querySelector<HTMLElement>('#history-overlay');
+  if (!overlay) return;
+  // Delegate events that target the table/footer because those nodes are
+  // replaced when the filters are refreshed. This keeps one listener per
+  // modal instead of adding listeners after every keystroke.
+  overlay.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    if (event.target === event.currentTarget || target.closest('#history-close')) { closeHistory(); return; }
+    if (target.closest('#export-history')) { exportHistoryCsv(); return; }
+    const sortButton = target.closest<HTMLButtonElement>('[data-history-sort]');
+    if (sortButton) { const key = sortButton.dataset.historySort as typeof historySort.key; historySort = { key, direction: historySort.key === key && historySort.direction === 'asc' ? 'desc' : 'asc' }; openHistory(); return; }
+    const deleteButton = target.closest<HTMLButtonElement>('.history-delete');
+    if (deleteButton) { if (!confirm('Delete this timer history entry?')) return; history = history.filter((item) => item.id !== deleteButton.dataset.historyId); persistHistory(); openHistory(); }
+  });
+  document.querySelector<HTMLInputElement>('#history-search')?.addEventListener('input', (e) => {
+    historySearch = (e.target as HTMLInputElement).value;
+    if (historySearchRefreshTimer !== undefined) window.clearTimeout(historySearchRefreshTimer);
+    historySearchRefreshTimer = window.setTimeout(() => { historySearchRefreshTimer = undefined; refreshHistoryContents(); }, 120);
+  });
   document.querySelector<HTMLSelectElement>('#history-preset')?.addEventListener('change', (e) => { historyPreset = (e.target as HTMLSelectElement).value; refreshHistoryContents(); });
   document.querySelector<HTMLInputElement>('#history-date-from')?.addEventListener('change', (e) => { historyDateFrom = (e.target as HTMLInputElement).value; refreshHistoryContents(); });
   document.querySelector<HTMLInputElement>('#history-date-to')?.addEventListener('change', (e) => { historyDateTo = (e.target as HTMLInputElement).value; refreshHistoryContents(); });
-  document.querySelectorAll<HTMLButtonElement>('[data-history-sort]').forEach((button) => button.addEventListener('click', () => { const key = button.dataset.historySort as typeof historySort.key; historySort = { key, direction: historySort.key === key && historySort.direction === 'asc' ? 'desc' : 'asc' }; openHistory(); }));
-  document.querySelectorAll<HTMLButtonElement>('.history-delete').forEach((button) => button.addEventListener('click', () => { if (!confirm('Delete this timer history entry?')) return; history = history.filter((item) => item.id !== button.dataset.historyId); persistHistory(); openHistory(); }));
 }
 function openHistory(): void {
   history = loadHistory(); historyOpen = true;
