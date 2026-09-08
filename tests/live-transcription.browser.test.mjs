@@ -125,7 +125,7 @@ test('transcription follows play, pause, resume, and reset', async () => {
 });
 
 test('editor re-renders do not reopen a closed timer modal', async () => {
-  const page = await openTimer();
+  const page = await openTimer({ width: 390, height: 760 });
   await page.click('#local-play');
   await page.click('#back-to-editor');
 
@@ -133,15 +133,21 @@ test('editor re-renders do not reopen a closed timer modal', async () => {
   await page.click('#save-preset');
   assert.notEqual(await page.getAttribute('#live-overlay', 'hidden'), null);
 
+  await page.click('.stage-row:nth-child(2) [data-stage-toggle]');
   const dragHandle = page.locator('.stage-row:nth-child(2) [data-stage-drag]');
   const destination = page.locator('.stage-row:nth-child(3)');
   const from = await dragHandle.boundingBox();
-  const to = await destination.boundingBox();
-  assert.ok(from && to);
+  assert.ok(from);
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
+  assert.equal(await page.locator('.stage-drag-ghost').count(), 1);
+  assert.equal(await page.locator('.stage-drag-ghost.is-expanded').count(), 0);
+  assert.equal(await page.locator('.stage-row:nth-child(2).is-expanded').count(), 0);
+  const to = await destination.boundingBox();
+  assert.ok(to);
   await page.mouse.move(to.x + to.width / 2, to.y + to.height * .75, { steps: 4 });
   await page.mouse.up();
+  assert.equal(await page.locator('.stage-drag-ghost').count(), 0);
   assert.notEqual(await page.getAttribute('#live-overlay', 'hidden'), null);
   assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="name"]'), 'Nearing limit');
   assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold-minutes"]'), '01');
@@ -149,5 +155,6 @@ test('editor re-renders do not reopen a closed timer modal', async () => {
   assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="name"]'), 'Approaching');
   assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-minutes"]'), '02');
   assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-seconds"]'), '00');
+  assert.equal(await page.locator('.stage-row:nth-child(3).is-expanded').count(), 1);
   await page.close();
 });

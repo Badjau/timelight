@@ -85,8 +85,10 @@ input:focus, select:focus { border-color: #5ca5e7; box-shadow: 0 0 0 3px rgba(92
 .stage-list { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 7px; overflow-y: auto; scrollbar-gutter: stable; }
 .stage-row { display: grid; grid-template-columns: 30px 9px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid rgba(169, 194, 225, .11); border-radius: 9px; background: rgba(7, 17, 30, .44); transition: border-color .2s, background .2s, box-shadow .2s, opacity .2s; }
 .stage-row:hover { border-color: rgba(169, 194, 225, .28); background: rgba(12, 28, 48, .6); }
-.stage-row.is-dragging { z-index: 3; border-color: rgba(116, 186, 255, .62); background: rgba(18, 39, 64, .96); box-shadow: 0 14px 32px rgba(0, 0, 0, .36), 0 0 0 1px rgba(116, 186, 255, .14); opacity: .94; }
-.stage-list.is-reordering .stage-row:not(.is-dragging) { opacity: .72; }
+.stage-row.is-dragging { border-color: rgba(116, 186, 255, .45); background: rgba(116, 186, 255, .07); box-shadow: inset 0 0 0 1px rgba(116, 186, 255, .08); opacity: .3; }
+.stage-list.is-reordering .stage-row:not(.is-dragging) { opacity: .72; will-change: transform; }
+.stage-drag-ghost { position: fixed !important; z-index: 2147483647; visibility: visible !important; margin: 0; border-color: rgba(116, 186, 255, .7); background: rgba(18, 39, 64, .98); box-shadow: 0 20px 44px rgba(0, 0, 0, .48), 0 0 0 1px rgba(116, 186, 255, .18); opacity: .96; pointer-events: none; transform-origin: center; will-change: transform; }
+.stage-drag-ghost .stage-drag-handle { color: #c6e4ff; cursor: grabbing; }
 .stage-main { display: contents; }
 .stage-number { color: #61758e; font-size: .74rem; font-weight: 800; }
 .stage-color { height: 34px; border-radius: 5px; background: var(--stage-color); box-shadow: 0 0 15px color-mix(in srgb, var(--stage-color), transparent 55%); }
