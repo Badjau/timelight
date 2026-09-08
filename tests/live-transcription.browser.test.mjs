@@ -123,3 +123,21 @@ test('transcription follows play, pause, resume, and reset', async () => {
   assert.equal(await page.locator('.timestamp-entry').count(), 0);
   await page.close();
 });
+
+test('editor re-renders do not reopen a closed timer modal', async () => {
+  const page = await openTimer();
+  await page.click('#local-play');
+  await page.click('#back-to-editor');
+
+  await page.fill('#preset-name', 'Updated preset');
+  await page.click('#save-preset');
+  assert.notEqual(await page.getAttribute('#live-overlay', 'hidden'), null);
+
+  await page.click('.stage-row:nth-child(2) .move-down');
+  assert.notEqual(await page.getAttribute('#live-overlay', 'hidden'), null);
+  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="name"]'), 'Nearing limit');
+  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold"]'), '01:00');
+  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="name"]'), 'Approaching');
+  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold"]'), '02:00');
+  await page.close();
+});

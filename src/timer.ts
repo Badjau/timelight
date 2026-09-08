@@ -14,6 +14,7 @@ export type PresetSnapshot = {
   speaker: string;
   duration: number;
   stages: Stage[];
+  failResultOutput?: string;
 };
 
 export type TimerRun = {
