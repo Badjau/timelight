@@ -89,12 +89,15 @@ test('phone layout places the open transcript below timer controls', async () =>
   const page = await openTimer({ width: 390, height: 760 });
   await page.click('#transcription-toggle-mobile');
   const positions = await page.evaluate(() => ({
-    controls: document.querySelector('.control-zone').getBoundingClientRect().top,
-    transcript: document.querySelector('#transcription-panel').getBoundingClientRect().top,
+    timerBottom: document.querySelector('.timer-zone').getBoundingClientRect().bottom,
+    controlsTop: document.querySelector('.control-zone').getBoundingClientRect().top,
+    controlsBottom: document.querySelector('.control-zone').getBoundingClientRect().bottom,
+    transcriptTop: document.querySelector('#transcription-panel').getBoundingClientRect().top,
     panelWidth: document.querySelector('#transcription-panel').getBoundingClientRect().width,
     cardWidth: document.querySelector('#timer-panel').getBoundingClientRect().width,
   }));
-  assert.ok(positions.transcript > positions.controls);
+  assert.ok(positions.controlsTop >= positions.timerBottom);
+  assert.ok(positions.transcriptTop >= positions.controlsBottom);
   assert.ok(positions.panelWidth >= positions.cardWidth - 32);
   await page.close();
 });
@@ -121,6 +124,25 @@ test('transcription follows play, pause, resume, and reset', async () => {
   await page.click('#local-reset');
   assert.equal(await page.textContent('#raw-transcript'), 'Speech will appear here.');
   assert.equal(await page.locator('.timestamp-entry').count(), 0);
+  await page.close();
+});
+
+test('stacked tablet layout keeps timer content, controls, and transcript separated', async () => {
+  const page = await openTimer({ width: 806, height: 776 });
+  await page.click('#transcription-toggle');
+  const positions = await page.evaluate(() => ({
+    displayBottom: document.querySelector('.timer-display').getBoundingClientRect().bottom,
+    stagesTop: document.querySelector('.stage-progress').getBoundingClientRect().top,
+    stagesBottom: document.querySelector('.stage-progress').getBoundingClientRect().bottom,
+    timerBottom: document.querySelector('.timer-zone').getBoundingClientRect().bottom,
+    controlsTop: document.querySelector('.control-zone').getBoundingClientRect().top,
+    controlsBottom: document.querySelector('.control-zone').getBoundingClientRect().bottom,
+    transcriptTop: document.querySelector('#transcription-panel').getBoundingClientRect().top,
+  }));
+  assert.ok(positions.stagesTop >= positions.displayBottom);
+  assert.ok(positions.timerBottom >= positions.stagesBottom);
+  assert.ok(positions.controlsTop >= positions.timerBottom);
+  assert.ok(positions.transcriptTop >= positions.controlsBottom);
   await page.close();
 });
 
