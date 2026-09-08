@@ -83,8 +83,10 @@ input:focus, select:focus { border-color: #5ca5e7; box-shadow: 0 0 0 3px rgba(92
 .stage-overview-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; color: #c1d1e3; font-size: .98rem; font-weight: 700; }
 .stage-overview-heading strong { color: #71859e; font-size: .84rem; font-weight: 500; }
 .stage-list { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 7px; overflow-y: auto; scrollbar-gutter: stable; }
-.stage-row { display: grid; grid-template-columns: 30px 9px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid rgba(169, 194, 225, .11); border-radius: 9px; background: rgba(7, 17, 30, .44); transition: border-color .2s, background .2s; }
+.stage-row { display: grid; grid-template-columns: 30px 9px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid rgba(169, 194, 225, .11); border-radius: 9px; background: rgba(7, 17, 30, .44); transition: border-color .2s, background .2s, box-shadow .2s, opacity .2s; }
 .stage-row:hover { border-color: rgba(169, 194, 225, .28); background: rgba(12, 28, 48, .6); }
+.stage-row.is-dragging { z-index: 3; border-color: rgba(116, 186, 255, .62); background: rgba(18, 39, 64, .96); box-shadow: 0 14px 32px rgba(0, 0, 0, .36), 0 0 0 1px rgba(116, 186, 255, .14); opacity: .94; }
+.stage-list.is-reordering .stage-row:not(.is-dragging) { opacity: .72; }
 .stage-main { display: contents; }
 .stage-number { color: #61758e; font-size: .74rem; font-weight: 800; }
 .stage-color { height: 34px; border-radius: 5px; background: var(--stage-color); box-shadow: 0 0 15px color-mix(in srgb, var(--stage-color), transparent 55%); }
@@ -102,6 +104,12 @@ input:focus, select:focus { border-color: #5ca5e7; box-shadow: 0 0 0 3px rgba(92
 .blink-field>span { align-self: flex-start; white-space: nowrap; }
 .blink-field input[type="checkbox"] { width: 18px; height: 18px; margin: 10px 0 0; padding: 0; accent-color: #74baff; cursor: pointer; }
 .stage-actions { display: flex; gap: 5px; }
+.stage-drag-handle { display: grid; width: 35px; height: 35px; padding: 0; place-items: center; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #7891ab; cursor: grab; touch-action: none; }
+.stage-drag-handle:hover { border-color: rgba(116, 186, 255, .22); background: rgba(116, 186, 255, .09); color: #b8d7f2; }
+.stage-drag-handle:focus-visible { outline: 2px solid #74baff; outline-offset: 2px; }
+.stage-drag-handle:active { cursor: grabbing; }
+.stage-drag-handle > span { display: grid; grid-template-columns: repeat(2, 3px); gap: 3px 4px; }
+.stage-drag-handle i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px rgba(116, 186, 255, .28); }
 .icon-button { width: 35px; height: 35px; padding: 0; border: 1px solid rgba(169, 194, 225, .13); border-radius: 6px; background: transparent; color: #8da3bb; font-size: 1.1rem; }
 .icon-button:hover:not(:disabled) { background: rgba(116, 186, 255, .12); color: #c9e5ff; }
 .icon-button:disabled { cursor: not-allowed; opacity: .25; }
@@ -264,6 +272,10 @@ body.live-open { overflow: hidden; }
 .footer { padding: 30px 0; color: #53677f; font-size: .72rem; text-align: center; }
 @keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 
+@media (prefers-reduced-motion: reduce) {
+  .stage-row, .stage-chevron { transition-duration: .01ms; }
+}
+
 @media (max-width: 1199px) {
   .live-overlay { padding: 20px; }
   .live-card.transcription-open { width: min(100%, 1000px); height: auto; max-height: calc(100dvh - 40px); }
@@ -338,7 +350,9 @@ body.live-open { overflow: hidden; }
   .last-stage .result-fields { grid-column: auto; grid-row: auto; grid-template-columns: 1fr; margin: 0 9px 10px; }
   .last-stage:not(.is-expanded) .result-fields { display: none; }
   .last-stage .stage-actions { grid-column: auto; grid-row: auto; }
-  .stage-actions { position: absolute; z-index: 2; top: 8px; right: 6px; display: block; }
+  .stage-actions { position: absolute; z-index: 2; top: 8px; right: 6px; display: flex; gap: 2px; }
+  .stage-drag-handle { width: 32px; height: 32px; }
+  .stage-summary { padding-right: 72px; }
   .desktop-stage-action { display: none; }
   .stage-menu-toggle { display: grid; width: 28px; height: 28px; border-color: rgba(169, 194, 225, .16); font-size: 1.15rem; line-height: 1; place-items: center; }
   .stage-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 4; display: block; min-width: 128px; padding: 5px; border: 1px solid rgba(169, 194, 225, .2); border-radius: 7px; background: #102238; box-shadow: 0 12px 24px rgba(0, 0, 0, .32); }
