@@ -136,8 +136,10 @@ test('editor re-renders do not reopen a closed timer modal', async () => {
   await page.click('.stage-row:nth-child(2) .move-down');
   assert.notEqual(await page.getAttribute('#live-overlay', 'hidden'), null);
   assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="name"]'), 'Nearing limit');
-  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold"]'), '01:00');
+  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold-minutes"]'), '01');
+  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold-seconds"]'), '00');
   assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="name"]'), 'Approaching');
-  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold"]'), '02:00');
+  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-minutes"]'), '02');
+  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-seconds"]'), '00');
   await page.close();
 });
