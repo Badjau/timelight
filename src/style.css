@@ -204,6 +204,11 @@ body.live-open { overflow: hidden; }
 .history-empty { padding: 34px !important; color: #71859e; text-align: center !important; }
 .history-card > footer { color: #71859e; font-size: .78rem; }
 .history-card > footer .secondary-button { margin: 0; }
+.history-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.history-filters input, .history-filters select { min-width: 160px; padding: 8px 10px; border: 1px solid rgba(169,194,225,.2); border-radius: 6px; background: #10243a; color: #e9f2ff; }
+.history-card th button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; text-transform: inherit; }
+.history-card th button:hover { color: #d8ecff; }
+.history-delete { color: #ff9daa; }
 .timer-warnings { display: grid; gap: 7px; margin-top: 18px; }
 .timer-warning { padding: 9px 11px; border: 1px solid rgba(255, 209, 102, .35); border-radius: 7px; background: rgba(122, 85, 18, .2); color: #ffd98a; font-size: .8rem; line-height: 1.35; }
 .live-layout { position: relative; }
@@ -394,6 +399,8 @@ body.live-open { overflow: hidden; }
   .player-button-main { width: 72px; height: 60px; }
   .history-overlay { padding: 0; place-items: stretch; }
   .history-card { width: 100%; max-height: 100dvh; padding: 18px 12px; border: 0; border-radius: 0; }
+  .history-filters { flex-direction: column; }
+  .history-filters input, .history-filters select, .history-filters button { width: 100%; min-width: 0; }
   .timer-zone { min-height: 0; padding: 14px 12px 12px; }
   .timer-display { display: flex; }
   .timer-display>span { font-size: clamp(3.8rem, 16vw, 6rem); }
