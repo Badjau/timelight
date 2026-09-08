@@ -193,6 +193,8 @@ body.live-open { overflow: hidden; }
 .history-overlay[hidden] { display: none; }
 .history-card { display: flex; width: min(100%, 1100px); max-height: calc(100dvh - 48px); padding: 24px; overflow: hidden; flex-direction: column; border: 1px solid rgba(169, 194, 225, .2); border-radius: 14px; background: #0b192a; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
 .history-card > header, .history-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.history-card > header { align-items: flex-start; }
+.history-heading { min-width: 0; flex: 1; }
 .history-card h2 { margin: 0; color: #edf6ff; font-size: 1.35rem; }
 .history-close { width: 36px; height: 36px; padding: 0; border: 1px solid rgba(169, 194, 225, .16); border-radius: 50%; color: #a8bfd7; font-size: 1.5rem; }
 .history-table-wrap { margin: 20px 0; overflow: auto; border: 1px solid rgba(169, 194, 225, .13); border-radius: 9px; }
@@ -204,6 +206,11 @@ body.live-open { overflow: hidden; }
 .history-empty { padding: 34px !important; color: #71859e; text-align: center !important; }
 .history-card > footer { color: #71859e; font-size: .78rem; }
 .history-card > footer .secondary-button { margin: 0; }
+.history-tools-toggle { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding: 2px 0; border: 0; background: transparent; color: #9fcdf6; font-size: .78rem; }
+.history-tools-toggle:hover { color: #d8ecff; }
+.history-tools-caret { display: inline-block; font-size: 1rem; line-height: 1; transform: rotate(-90deg); transition: transform .15s ease; }
+.history-tools-toggle[aria-expanded="true"] .history-tools-caret { transform: rotate(0); }
+.history-tools[hidden] { display: none; }
 .history-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .history-filters input, .history-filters select { min-width: 160px; padding: 8px 10px; border: 1px solid rgba(169,194,225,.2); border-radius: 6px; background: #10243a; color: #e9f2ff; }
 .history-card th button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; text-transform: inherit; }
