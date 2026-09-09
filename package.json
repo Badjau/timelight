@@ -8,6 +8,7 @@
     "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
     "preview": "vite preview",
     "test": "node --test tests/timer.test.mjs tests/serial.test.mjs tests/transcription.browser.test.mjs tests/live-transcription.browser.test.mjs",
+    "test:pwa": "npm run build && node --test tests/pwa.browser.test.mjs",
     "test:transcription": "node --test tests/transcription.browser.test.mjs",
     "test:transcription:smoke": "node scripts/transcription-smoke.mjs"
   },

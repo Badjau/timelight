@@ -27,8 +27,8 @@ jobs:
         run: npm ci
       - name: Run tests
         run: npm test
-      - name: Build application
-        run: npm run build
+      - name: Build and verify PWA artifact
+        run: npm run test:pwa
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

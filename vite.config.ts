@@ -14,10 +14,10 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['favicon.svg'],
       manifest: {
         name: 'TimeLight',
         short_name: 'TimeLight',
+        id: '/timelight/',
         description: 'A clear visual timing system for speakers and events.',
         start_url: '/timelight/',
         scope: '/timelight/',
@@ -27,21 +27,21 @@ export default defineConfig({
         background_color: '#08111f',
         icons: [
           {
-            src: 'pwa-192x192.svg',
+            src: 'pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/svg+xml',
+            type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'pwa-512x512.svg',
+            src: 'pwa-512x512.png',
             sizes: '512x512',
-            type: 'image/svg+xml',
+            type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'pwa-512x512-maskable.svg',
+            src: 'pwa-512x512-maskable.png',
             sizes: '512x512',
-            type: 'image/svg+xml',
+            type: 'image/png',
             purpose: 'maskable',
           },
         ],
@@ -51,6 +51,8 @@ export default defineConfig({
         // intentionally do not add runtime network caching.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         cleanupOutdatedCaches: true,
+        navigateFallback: 'index.html',
+        navigateFallbackAllowlist: [/^\/timelight\//],
       },
     }),
   ],

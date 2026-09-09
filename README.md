@@ -36,10 +36,12 @@ Cast both the channel difference and elapsed time to `int32_t` before multiplyin
 ## Offline installation and verification
 
 1. Open <https://badjau.github.io/timelight/> in desktop Chrome or Microsoft Edge.
-2. Install the PWA from the browser address bar or application menu.
+2. Install it from either the browser address-bar install control/application menu, or the in-app **Install app** button when it appears.
 3. Open it once while online, then close all TimeLight windows.
 4. Disable networking and launch the installed application again.
 5. Confirm the shell opens and reports **Offline · Running from the cached shell**.
+
+The browser control and in-app action are both optional entry points. Neither may appear when TimeLight is already installed, the browser is in Incognito, the browser does not support PWA installation, or an organization’s managed-browser policy disables installation. Chrome’s native address-bar/menu control remains available when the app qualifies for installation.
 
 The generated service worker precaches the complete build and has no runtime API cache. Updates use the service worker waiting lifecycle; an open timer is not reloaded by an update.
 
