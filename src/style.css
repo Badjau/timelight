@@ -383,7 +383,7 @@ body.live-open { overflow: hidden; }
   .back-button { width: 30px; height: 30px; font-size: 1.65rem; }
   .live-header h2 { font-size: 1rem; }
   .live-speaker { font-size: 1.8rem; }
-  .timer-preset-picker { width: min(100%, 360px); margin-bottom: 12px; }
+  .timer-preset-picker { width: min(calc(100% - 72px), 360px); margin-bottom: 12px; }
   .live-state { padding: 6px 9px; font-size: .72rem; }
   .live-layout { grid-template-columns: 1fr; gap: 10px; padding-top: 12px; }
   .live-card.transcription-open { height: 100%; max-height: none; overflow-y: auto; }

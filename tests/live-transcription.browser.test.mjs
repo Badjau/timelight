@@ -53,7 +53,7 @@ test('timer modal transcribes, timestamps, stage-colors, and copies speech', asy
   await page.click('#local-play');
   await page.click('#transcription-toggle');
   const controlOrder = await page.locator('.player-controls > button').evaluateAll((buttons) => buttons.map((button) => button.id));
-  assert.deepEqual(controlOrder, ['local-reset', 'local-play', 'local-next-stage', 'transcription-toggle']);
+  assert.deepEqual(controlOrder, ['local-reset', 'local-play', 'local-next-stage', 'transcription-toggle', 'local-stop']);
   await page.waitForFunction(() => document.querySelector('#transcription-status strong')?.textContent === 'Listening');
   await page.evaluate(() => window.__recognizers.at(-1).emit('good day everyone'));
   assert.equal(await page.textContent('#raw-transcript'), 'Good day everyone.');
@@ -149,6 +149,12 @@ test('stacked tablet layout keeps timer content, controls, and transcript separa
 test('editor re-renders do not reopen a closed timer modal', async () => {
   const page = await openTimer({ width: 390, height: 760 });
   await page.click('#local-play');
+  const headerControls = await page.evaluate(() => {
+    const back = document.querySelector('#back-to-editor').getBoundingClientRect();
+    const picker = document.querySelector('#timer-preset-picker').getBoundingClientRect();
+    return { backRight: back.right, pickerLeft: picker.left };
+  });
+  assert.ok(headerControls.backRight <= headerControls.pickerLeft);
   await page.click('#back-to-editor');
 
   await page.fill('#preset-name', 'Updated preset');
@@ -157,7 +163,8 @@ test('editor re-renders do not reopen a closed timer modal', async () => {
 
   await page.click('.stage-row:nth-child(2) [data-stage-toggle]');
   const dragHandle = page.locator('.stage-row:nth-child(2) [data-stage-drag]');
-  const destination = page.locator('.stage-row:nth-child(3)');
+  const destination = page.locator('#stage-list > .stage-row:nth-child(3)');
+  await dragHandle.scrollIntoViewIfNeeded();
   const from = await dragHandle.boundingBox();
   assert.ok(from);
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
