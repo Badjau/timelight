@@ -51,7 +51,8 @@ button { cursor: pointer; }
 .preset-control input { width: 100%; margin: 0; padding: 14px 46px 14px 16px; border-color: rgba(116, 186, 255, .42); background: rgba(6, 15, 27, .66); font-size: .95rem; font-weight: 650; }
 .preset-picker-toggle { position: absolute; top: 1px; right: 1px; width: 42px; height: calc(100% - 2px); padding: 0; border: 0; border-left: 1px solid rgba(169, 194, 225, .12); background: transparent; color: #9cb4cd; font-size: 1.3rem; line-height: 1; }
 .preset-picker-toggle:hover { background: rgba(116, 186, 255, .1); color: #d8ecff; }
-.preset-picker-speaker { display: none; margin-top: 5px; padding-left: 16px; overflow: hidden; color: color-mix(in srgb, #e9f2ff, transparent 48%); font-size: .76rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.preset-picker-meta { display: none; margin-top: 5px; padding-left: 16px; overflow: hidden; color: color-mix(in srgb, #e9f2ff, transparent 48%); font-size: .76rem; font-weight: 550; gap: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.preset-picker-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .preset-menu { position: absolute; top: calc(100% + 8px); right: 0; left: 0; z-index: 5; display: flex; flex-direction: column; gap: 3px; max-height: 260px; padding: 8px; overflow-y: auto; border: 1px solid rgba(169, 194, 225, .22); border-radius: 8px; background: #102238; box-shadow: 0 16px 35px rgba(0, 0, 0, .3); }
 .preset-menu[hidden] { display: none; }
 .preset-menu-label, .preset-menu-empty { padding: 7px 9px; color: #71859e; font-size: .75rem; }
@@ -67,10 +68,11 @@ button { cursor: pointer; }
 .save-button:disabled { cursor: not-allowed; opacity: .34; }
 .toolbar-button.danger-button { color: #bd7d8a; }
 .toolbar-button:disabled, .back-button:disabled { cursor: not-allowed; opacity: .35; }
-.saved-preset { --preset-name-color: #9aacc0; display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 11px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--preset-name-color); font-size: .8rem; text-align: left; }
+.saved-preset { --preset-name-color: #9aacc0; display: grid; width: 100%; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 10px 11px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--preset-name-color); font-size: .8rem; text-align: left; }
 .saved-preset:hover, .saved-preset.active { --preset-name-color: #b9ddff; border-color: rgba(116, 186, 255, .28); background: rgba(72, 132, 194, .14); }
-.preset-option-name { min-width: 0; overflow: hidden; color: var(--preset-name-color); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.preset-option-speaker { min-width: 0; overflow: hidden; color: color-mix(in srgb, var(--preset-name-color), transparent 48%); font-size: .74rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.preset-option-club, .preset-option-name, .preset-option-speaker { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-option-club { color: var(--preset-name-color); font-weight: 700; }
+.preset-option-speaker, .preset-option-name { color: color-mix(in srgb, var(--preset-name-color), transparent 38%); font-size: .74rem; font-weight: 500; }
 
 .overview-canvas { display: flex; min-height: 0; flex: 1 1 auto; padding: 0; border: 0; border-radius: 0; background: transparent; transition: border-color .2s; }
 .overview-canvas.invalid { border: 0; animation: shake .28s ease-in-out 2; }
@@ -151,6 +153,7 @@ body.live-open { overflow: hidden; }
 .live-heading { display: flex; min-width: 0; align-items: center; flex-direction: column; text-align: center; }
 .live-header h2 { order: 3; margin: 0; color: color-mix(in srgb, #eff6ff, transparent 42%); font-size: 1.15rem; font-weight: 650; }
 .live-speaker { display: block; order: 2; margin: 0 0 3px; color: #f6fbff; font-size: clamp(1.7rem, 3.5vw, 3rem); font-weight: 750; letter-spacing: -.05em; line-height: 1.05; overflow-wrap: anywhere; text-align: center; }
+.live-club { display: block; order: 1; margin-bottom: 3px; color: #9fcdf6; font-size: .82rem; font-weight: 750; letter-spacing: .08em; overflow-wrap: anywhere; text-transform: uppercase; }
 .timer-preset-picker { order: 1; width: min(100%, 360px); margin: 0 auto 10px; }
 .timer-preset-toggle { position: relative; display: grid; width: 100%; min-width: 0; padding: 7px 36px; justify-items: center; border: 1px solid rgba(116, 186, 255, .3); border-radius: 8px; background: rgba(6, 15, 27, .55); color: #eff6ff; text-align: center; }
 .timer-preset-toggle:hover { border-color: rgba(116, 186, 255, .62); background: rgba(116, 186, 255, .1); }
@@ -347,8 +350,8 @@ body.live-open { overflow: hidden; }
   .wireframe-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px; }
   .preset-control { display: contents; }
   .preset-picker { grid-column: 1 / -1; grid-row: 1; width: 100%; min-width: 0; }
-  .preset-picker-speaker { display: block; }
-  .saved-preset { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .preset-picker-meta { display: flex; }
+  .saved-preset { grid-template-columns: 1fr; align-items: flex-start; gap: 2px; }
   .preset-actions { grid-column: 1; grid-row: 2; width: auto; justify-content: flex-start; flex-wrap: nowrap; }
   .wireframe-toolbar > .toolbar-actions { grid-column: 2; grid-row: 2; width: auto; justify-content: flex-end; flex-wrap: nowrap; overflow-x: visible; }
   .overview-canvas { padding: 0; }

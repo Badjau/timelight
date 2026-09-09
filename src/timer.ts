@@ -12,6 +12,7 @@ export type Stage = {
 export type PresetSnapshot = {
   name: string;
   speaker: string;
+  club: string;
   duration: number;
   stages: Stage[];
   failResultOutput?: string;
