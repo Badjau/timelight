@@ -109,9 +109,24 @@ test('production artifact is installable and serves its cached shell offline', a
     assert.deepEqual([icon.width, icon.height], [icon.expected, icon.expected]);
   }
 
-  await page.waitForFunction(() => navigator.serviceWorker?.ready.then((registration) => registration.active?.state === 'activated'));
   const serviceWorker = await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
+    const worker = registration.active ?? registration.waiting ?? registration.installing;
+    if (worker && worker.state !== 'activated') {
+      await new Promise((resolveWorker, rejectWorker) => {
+        const handleStateChange = () => {
+          if (worker.state === 'activated') {
+            worker.removeEventListener('statechange', handleStateChange);
+            resolveWorker();
+          } else if (worker.state === 'redundant') {
+            worker.removeEventListener('statechange', handleStateChange);
+            rejectWorker(new Error('Service worker became redundant before activation.'));
+          }
+        };
+        worker.addEventListener('statechange', handleStateChange);
+        handleStateChange();
+      });
+    }
     return { scope: registration.scope, active: registration.active?.state };
   });
   assert.equal(serviceWorker.scope, new URL('/timelight/', pageUrl).href);
