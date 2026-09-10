@@ -38,6 +38,44 @@ export function allottedTime(preset: PresetSnapshot, totalDuration: number): num
   return Math.max(0, total - graceTime);
 }
 
+export type AllottedTimeRange = { start: number; end: number };
+
+function formatRangeBoundary(seconds: number): string {
+  const safe = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  const minutes = Math.floor(safe / 60);
+  return `${minutes === 0 ? '00' : minutes}:${String(safe % 60).padStart(2, '0')}`;
+}
+
+export function formatAllottedTimeRange(range: AllottedTimeRange): string {
+  return `${formatRangeBoundary(range.start)} to ${formatRangeBoundary(range.end)}`;
+}
+
+export function allottedTimeRange(preset: PresetSnapshot, totalDuration: number): AllottedTimeRange | null {
+  const total = Math.max(0, Number.isFinite(totalDuration) ? totalDuration : 0);
+  const finalStage = preset.stages[preset.stages.length - 1];
+  // The final non-grace stage is the end/failure indicator. It does not make
+  // the grace period immediately before it an intervening grace period.
+  const terminalStage = finalStage && !isGraceStage(finalStage) ? finalStage : null;
+  const timedStages = terminalStage ? preset.stages.slice(0, -1) : preset.stages;
+  const firstNonGrace = timedStages.findIndex((stage) => !isGraceStage(stage));
+  let lastNonGrace = -1;
+  for (let index = timedStages.length - 1; index >= 0; index -= 1) {
+    if (!isGraceStage(timedStages[index])) { lastNonGrace = index; break; }
+  }
+
+  // An opening grace starts a range that can end at either a trailing grace or
+  // the terminal failure stage. An intervening grace keeps the duration calculation.
+  if (firstNonGrace <= 0 || lastNonGrace < firstNonGrace) return null;
+  if (timedStages.slice(firstNonGrace, lastNonGrace + 1).some(isGraceStage)) return null;
+  const trailingGrace = timedStages[lastNonGrace + 1];
+  if (!terminalStage && !trailingGrace) return null;
+
+  const start = Math.min(total, Math.max(0, timedStages[firstNonGrace].threshold));
+  const endThreshold = terminalStage ? terminalStage.threshold : trailingGrace!.threshold;
+  const end = Math.min(total, Math.max(start, endThreshold));
+  return { start, end };
+}
+
 export type TimerRun = {
   preset: PresetSnapshot;
   runId: string;

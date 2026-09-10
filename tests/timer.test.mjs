@@ -23,9 +23,47 @@ test('allotted time excludes every stage whose name contains the word grace', ()
   ] };
 
   assert.equal(timer.allottedTime(gracePreset, 300), 225);
+  assert.equal(timer.allottedTimeRange(gracePreset, 300), null);
   assert.equal(timer.allottedTime({ ...gracePreset, stages: [{ ...gracePreset.stages[0], name: 'Disgrace', threshold: 0 }, ...gracePreset.stages.slice(1)] }, 300), 255);
   assert.equal(timer.allottedTime({ ...preset, stages: preset.stages.map((stage, index) => index === 1 ? { ...stage, grace: true } : stage) }, 8), 3);
   assert.equal(timer.allottedTime({ ...preset, duration: 10, stages: [{ ...preset.stages[0], name: 'Grace period', grace: false }, ...preset.stages.slice(1)] }, 10), 10);
+});
+
+test('allotted time is a range when grace stages only bookend the timed stages', () => {
+  const bookendedPreset = { ...preset, duration: 90, stages: [
+    { ...preset.stages[0], name: 'Grace before', threshold: 0, grace: true },
+    { ...preset.stages[1], name: 'Speech', threshold: 15, grace: false },
+    { ...preset.stages[2], name: 'Grace after', threshold: 75, grace: true },
+  ] };
+  const terminalPreset = { ...bookendedPreset, stages: [
+    bookendedPreset.stages[0],
+    bookendedPreset.stages[1],
+    { ...bookendedPreset.stages[2], threshold: 60 },
+    { ...preset.stages[2], name: 'Fail', threshold: 90, grace: false },
+  ] };
+  const fifteenSecondFinalGracePreset = { ...terminalPreset, duration: 75, stages: terminalPreset.stages.map((stage, index) => (
+    index === 3 ? { ...stage, threshold: 75 } : stage
+  )) };
+  const openingGraceOnlyPreset = { ...fifteenSecondFinalGracePreset, stages: [
+    fifteenSecondFinalGracePreset.stages[0],
+    fifteenSecondFinalGracePreset.stages[1],
+    fifteenSecondFinalGracePreset.stages[3],
+  ] };
+  const internalGracePreset = { ...bookendedPreset, stages: [
+    bookendedPreset.stages[0],
+    bookendedPreset.stages[1],
+    { ...preset.stages[1], name: 'Grace between', threshold: 45, grace: true },
+    { ...preset.stages[1], name: 'Speech resumes', threshold: 60, grace: false },
+    bookendedPreset.stages[2],
+  ] };
+
+  assert.deepEqual(timer.allottedTimeRange(bookendedPreset, 90), { start: 15, end: 75 });
+  assert.deepEqual(timer.allottedTimeRange(terminalPreset, 90), { start: 15, end: 90 });
+  assert.equal(timer.formatAllottedTimeRange(timer.allottedTimeRange(bookendedPreset, 90)), '00:15 to 1:15');
+  assert.equal(timer.formatAllottedTimeRange(timer.allottedTimeRange(fifteenSecondFinalGracePreset, 75)), '00:15 to 1:15');
+  assert.equal(timer.formatAllottedTimeRange(timer.allottedTimeRange(openingGraceOnlyPreset, 75)), '00:15 to 1:15');
+  assert.equal(timer.allottedTimeRange(internalGracePreset, 90), null);
+  assert.equal(timer.allottedTime(internalGracePreset, 90), 45);
 });
 
 test('fake clock covers start, thresholds, pause, resume, and elapsed beyond duration', () => {

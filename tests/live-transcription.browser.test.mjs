@@ -96,6 +96,15 @@ test('grace stages are marked and saved as excluded allotted time', async () => 
   await page.close();
 });
 
+test('stop and save confirmation survives timer status refreshes', async () => {
+  const page = await openTimer();
+  await page.click('#local-play');
+  await page.click('#local-stop');
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  assert.equal(await page.textContent('.timer-saved'), 'Timer stopped and saved to history.');
+  await page.close();
+});
+
 test('editor allows seven stages and stops at the limit', async () => {
   const page = await openTimer();
   await page.click('#back-to-editor');
