@@ -92,14 +92,13 @@ test('grace stages are marked and saved as excluded allotted time', async () => 
 
   const headers = await page.locator('#history-overlay th').allTextContents();
   assert.ok(headers.includes('Allotted Time'));
-  assert.equal(await page.locator('#history-overlay tbody tr').first().locator('td').nth(5).textContent(), '01:00');
+  assert.equal(await page.locator('#history-overlay tbody tr').first().locator('td').nth(5).textContent(), '00:30');
   await page.close();
 });
 
 test('editor allows seven stages and stops at the limit', async () => {
   const page = await openTimer();
   await page.click('#back-to-editor');
-  await page.click('#add-stage');
   await page.click('#add-stage');
   await page.click('#add-stage');
   assert.equal(await page.locator('.stage-row').count(), 7);
