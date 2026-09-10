@@ -12,6 +12,21 @@ const preset = { name: 'Test', speaker: '', duration: 10, stages: [
 ] };
 const at = (wallMs, monotonicMs = wallMs) => ({ wallMs, monotonicMs });
 
+test('allotted time excludes every stage whose name contains the word grace', () => {
+  const gracePreset = { ...preset, duration: 300, stages: [
+    { ...preset.stages[0], name: 'Grace before', threshold: 0 },
+    { ...preset.stages[1], name: 'Speech', threshold: 30 },
+    { ...preset.stages[1], name: 'Mid-speech GRACE period', threshold: 120 },
+    { ...preset.stages[1], name: 'Speech resumes', threshold: 135 },
+    { ...preset.stages[2], name: 'Grace after', threshold: 270 },
+    { ...preset.stages[2], name: 'Time reached', threshold: 300 },
+  ] };
+
+  assert.equal(timer.allottedTime(gracePreset, 300), 225);
+  assert.equal(timer.allottedTime({ ...gracePreset, stages: [{ ...gracePreset.stages[0], name: 'Disgrace', threshold: 0 }, ...gracePreset.stages.slice(1)] }, 300), 255);
+  assert.equal(timer.allottedTime({ ...preset, stages: preset.stages.map((stage, index) => index === 1 ? { ...stage, grace: true } : stage) }, 8), 3);
+});
+
 test('fake clock covers start, thresholds, pause, resume, and elapsed beyond duration', () => {
   let result = timer.reduceTimer(null, { type: 'start', preset }, at(0));
   assert.equal(result.run.state, 'running');

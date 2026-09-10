@@ -71,6 +71,31 @@ test('timer modal transcribes, timestamps, stage-colors, and copies speech', asy
   await page.close();
 });
 
+test('grace stages are marked and saved as excluded allotted time', async () => {
+  const page = await openTimer();
+  await page.click('#back-to-editor');
+
+  const firstStage = page.locator('.stage-row').nth(0);
+  await firstStage.locator('[data-field="name"]').fill('Opening grace');
+  assert.equal(await firstStage.locator('[data-field="grace"]').isChecked(), true);
+  assert.equal(await firstStage.evaluate((row) => row.classList.contains('is-grace')), true);
+
+  const secondStage = page.locator('.stage-row').nth(1);
+  await secondStage.locator('[data-field="grace"]').check();
+  assert.equal(await secondStage.evaluate((row) => row.classList.contains('is-grace')), true);
+
+  await page.click('#play-preset');
+  await page.click('#local-play');
+  await page.click('#local-stop');
+  await page.click('#back-to-editor');
+  await page.click('#open-history');
+
+  const headers = await page.locator('#history-overlay th').allTextContents();
+  assert.ok(headers.includes('Allotted Time'));
+  assert.equal(await page.locator('#history-overlay tbody tr').first().locator('td').nth(5).textContent(), '01:00');
+  await page.close();
+});
+
 test('desktop transcript is docked without squeezing the timer workspace', async () => {
   const page = await openTimer({ width: 1440, height: 900 });
   await page.click('#transcription-toggle');

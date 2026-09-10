@@ -6,6 +6,7 @@ export type Stage = {
   threshold: number;
   color: string;
   blink?: boolean;
+  grace?: boolean;
   buzzer: BuzzerMode;
 };
 
@@ -17,6 +18,22 @@ export type PresetSnapshot = {
   stages: Stage[];
   failResultOutput?: string;
 };
+
+export function isGraceStage(stage: Pick<Stage, 'name' | 'grace'>): boolean {
+  return Boolean(stage.grace) || /(?:^|\W)grace(?:$|\W)/i.test(stage.name);
+}
+
+export function allottedTime(preset: PresetSnapshot, totalDuration: number): number {
+  const total = Math.max(0, Number.isFinite(totalDuration) ? totalDuration : 0);
+  const graceTime = preset.stages.reduce((sum, stage, index) => {
+    if (!isGraceStage(stage)) return sum;
+    const start = Math.min(total, Math.max(0, stage.threshold));
+    const nextThreshold = preset.stages[index + 1]?.threshold ?? total;
+    const end = Math.min(total, Math.max(start, nextThreshold));
+    return sum + end - start;
+  }, 0);
+  return Math.max(0, total - graceTime);
+}
 
 export type TimerRun = {
   preset: PresetSnapshot;
