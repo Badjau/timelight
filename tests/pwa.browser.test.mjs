@@ -139,8 +139,10 @@ test('production artifact is installable and serves its cached shell offline', a
   await context.addInitScript(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); });
   const offlinePage = await context.newPage();
   await offlinePage.goto(pageUrl);
-  await offlinePage.waitForSelector('#connection-state');
-  assert.equal(await offlinePage.textContent('#connection-state'), 'Offline · Running from the cached shell');
+  const connectionBadge = offlinePage.locator('#connection-badge');
+  await connectionBadge.waitFor({ state: 'visible' });
+  assert.match(await connectionBadge.getAttribute('class') ?? '', /\boffline\b/);
+  assert.equal(await connectionBadge.getAttribute('aria-label'), 'Network connection unavailable · Running from the cached shell');
   await context.setOffline(false);
   await context.close();
 });

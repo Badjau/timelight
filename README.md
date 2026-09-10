@@ -39,7 +39,7 @@ Cast both the channel difference and elapsed time to `int32_t` before multiplyin
 2. Install it from either the browser address-bar install control/application menu, or the in-app **Install app** button when it appears.
 3. Open it once while online, then close all TimeLight windows.
 4. Disable networking and launch the installed application again.
-5. Confirm the shell opens and reports **Offline · Running from the cached shell**.
+5. Confirm the shell opens and the connection badge reports **Network connection unavailable · Running from the cached shell**.
 
 The browser control and in-app action are both optional entry points. Neither may appear when TimeLight is already installed, the browser is in Incognito, the browser does not support PWA installation, or an organization’s managed-browser policy disables installation. Chrome’s native address-bar/menu control remains available when the app qualifies for installation.
 
