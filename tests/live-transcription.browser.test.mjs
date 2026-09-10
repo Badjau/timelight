@@ -71,7 +71,7 @@ test('timer modal transcribes, timestamps, stage-colors, and copies speech', asy
   await page.close();
 });
 
-test('grace stages are marked and saved as excluded allotted time', async () => {
+test('grace stages are marked and saved as an allotted-time range', async () => {
   const page = await openTimer();
   await page.click('#back-to-editor');
 
@@ -92,7 +92,7 @@ test('grace stages are marked and saved as excluded allotted time', async () => 
 
   const headers = await page.locator('#history-overlay th').allTextContents();
   assert.ok(headers.includes('Allotted Time'));
-  assert.equal(await page.locator('#history-overlay tbody tr').first().locator('td').nth(5).textContent(), '00:15');
+  assert.equal(await page.locator('#history-overlay tbody tr').first().locator('td').nth(5).textContent(), '00:30 to 1:00');
   await page.close();
 });
 
