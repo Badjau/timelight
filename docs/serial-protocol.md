@@ -1,6 +1,6 @@
 # TimeLight serial protocol v4
 
-Protocol v4 is a compact binary protocol for firmware 0.5.3. The website and controller must be upgraded together; protocol-v3 JSON firmware cannot parse v4 frames.
+Protocol v4 is a compact binary protocol for firmware 0.5.5. The website and controller must be upgraded together; firmware before 0.5.5 accepts at most five stages and protocol-v3 JSON firmware cannot parse v4 frames.
 
 ## Framing
 
@@ -49,11 +49,11 @@ LED effects are off `0`, solid `1`, and blink `2`. Animation is paused `0` or pl
 
 ## Standalone preset storage
 
-`store_preset` contains session ID `u32`, duration seconds `u32`, stage count `u8`, followed by 3-5 eight-byte stages. Each stage contains threshold seconds `u32`, RGB `u8x3`, and flags `u8`. Flags use bits 0-1 for buzzer mode (none `0`, once `1`, repeat `2`) and bit 2 for blink.
+`store_preset` contains session ID `u32`, duration seconds `u32`, stage count `u8`, followed by 3-7 eight-byte stages. Each stage contains threshold seconds `u32`, RGB `u8x3`, and flags `u8`. Flags use bits 0-1 for buzzer mode (none `0`, once `1`, repeat `2`) and bit 2 for blink.
 
-The maximum five-stage preset payload is 49 bytes and its complete COBS wire frame is at most 63 bytes. It no longer depends on a large receive buffer or textual field lengths.
+The maximum seven-stage preset payload is 65 bytes and its complete COBS wire frame is at most 79 bytes. It no longer depends on textual field lengths.
 
-Only this explicit command writes EEPROM. Two checksummed, versioned slots protect the previous preset from an interrupted write. Runtime elapsed time, stage, and pause state remain volatile, and boot always starts idle/off.
+Only this explicit command writes EEPROM. Two checksummed, versioned slots protect the previous preset from an interrupted write. Firmware 0.5.5 migrates presets stored in the previous five-stage layout. Runtime elapsed time, stage, and pause state remain volatile, and boot always starts idle/off.
 
 ## Diagnostics
 

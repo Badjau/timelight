@@ -96,6 +96,20 @@ test('grace stages are marked and saved as excluded allotted time', async () => 
   await page.close();
 });
 
+test('editor allows seven stages and stops at the limit', async () => {
+  const page = await openTimer();
+  await page.click('#back-to-editor');
+  await page.click('#add-stage');
+  await page.click('#add-stage');
+  await page.click('#add-stage');
+  assert.equal(await page.locator('.stage-row').count(), 7);
+  assert.equal(await page.textContent('#stage-count'), '7 of 7');
+  assert.equal(await page.locator('#add-stage').isDisabled(), true);
+  assert.equal(await page.inputValue('.stage-row:nth-child(6) [data-field="color"]'), '#00c2a8');
+  assert.equal(await page.inputValue('.stage-row:nth-child(7) [data-field="color"]'), '#ff4fa3');
+  await page.close();
+});
+
 test('desktop transcript is docked without squeezing the timer workspace', async () => {
   const page = await openTimer({ width: 1440, height: 900 });
   await page.click('#transcription-toggle');

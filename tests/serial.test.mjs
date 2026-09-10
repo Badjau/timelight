@@ -179,13 +179,17 @@ test('standalone capability gates exact compact preset serialization and retries
     { threshold: 20000, color: '#ff0000', blink: false, buzzer: 'repeat' },
     { threshold: 30000, color: '#ffffff', blink: true, buzzer: 'none' },
     { threshold: 40000, color: '#00ffff', blink: false, buzzer: 'repeat' },
+    { threshold: 50000, color: '#00c2a8', blink: false, buzzer: 'once' },
+    { threshold: 60000, color: '#ff4fa3', blink: true, buzzer: 'none' },
   ] };
   await serial.storePreset(preset);
   const stores = fake.writes.filter((message) => message.type === 'store_preset');
   assert.equal(stores.length, 2);
   assert.deepEqual(stores[0], { version: 4, requestId: stores[0].requestId, type: 'store_preset', sessionId: serial.browserSessionId, duration: preset.duration, stages: preset.stages.map(({ threshold, color, blink, buzzer }) => [threshold, color, blink, buzzer]) });
   assert.ok(Number.isInteger(stores[0].requestId));
-  assert.ok(serialModule.encodeWireMessage(stores[0]).length <= 63);
+  assert.ok(serialModule.encodeWireMessage(stores[0]).length <= 79);
+  await assert.rejects(serial.storePreset({ ...preset, stages: [...preset.stages, preset.stages[0]] }), /3 to 7 stages/);
+  assert.equal(fake.writes.filter((message) => message.type === 'store_preset').length, 2);
   await serial.disconnect();
   assert.equal(fake.writes.at(-1).type, 'release_control');
 });

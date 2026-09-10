@@ -4,7 +4,7 @@ TimeLight is a programmable visual timing system for speeches, presentations, de
 
 The website owns timer state whenever it is connected: it stores preset snapshots, derives elapsed time from timestamps, selects stages, and routes screen and physical controls through one reducer. Active browser runs survive refreshes and continue beyond the configured duration in the final stage until Pause or Reset. The site remains fully usable without hardware.
 
-The optional Arduino Nano can also run one device-owned preset when no browser session is active. The paper-plane Send action explicitly stores the current editor values—including unsaved edits—in dual checksummed EEPROM slots. Save and Connect never overwrite device memory. Timer progress remains volatile, so reset and power-up are always idle/off. Binary protocol v4 keeps even a five-stage preset below 64 bytes on the wire.
+The optional Arduino Nano can also run one device-owned preset when no browser session is active. The paper-plane Send action explicitly stores the current editor values—including unsaved edits—in dual checksummed EEPROM slots. Save and Connect never overwrite device memory. Timer progress remains volatile, so reset and power-up are always idle/off. Binary protocol v4 supports up to seven stages in a wire frame below 80 bytes.
 
 ## Local development
 
@@ -25,7 +25,7 @@ Use desktop Chrome or Microsoft Edge over the HTTPS production origin. A handsha
 
 See [`docs/serial-protocol.md`](docs/serial-protocol.md) and [`arduino/README.md`](arduino/README.md) for the complete protocol and upload instructions.
 
-Protocol v4 requires firmware 0.5.3 and the matching website. Connection lifecycle and errors appear in DevTools with a `[TimeLight serial]` prefix. Set `localStorage['timelight-serial-debug'] = '1'` and reload to include per-frame summaries.
+Seven-stage protocol-v4 presets require firmware 0.5.5 and the matching website. Connection lifecycle and errors appear in DevTools with a `[TimeLight serial]` prefix. Set `localStorage['timelight-serial-debug'] = '1'` and reload to include per-frame summaries.
 
 ### Nano LED transition troubleshooting
 

@@ -22,8 +22,9 @@
 #define BUZZER_REPEAT_DURATION_MS 500
 #define BUZZER_ONCE_DURATION_MS 800
 #define PRESET_MAGIC 0x544C5053UL
-#define PRESET_SCHEMA 1
-#define MAX_STAGES 5
+#define PRESET_SCHEMA 2
+#define MAX_STAGES 7
+#define LEGACY_MAX_STAGES 5
 #define BUZZ_EVENT_SLOTS 4
 
 enum FrameType { FRAME_HELLO=1, FRAME_READY, FRAME_ACK, FRAME_ERROR, FRAME_PING, FRAME_PONG, FRAME_KEEPALIVE, FRAME_RELEASE, FRAME_OUTPUTS, FRAME_BUZZ, FRAME_PRESET, FRAME_BUTTON };
@@ -33,6 +34,7 @@ enum BuzzerMode { BUZZER_NONE, BUZZER_ONCE, BUZZER_REPEAT };
 enum TimerState { TIMER_IDLE, TIMER_RUNNING, TIMER_PAUSED };
 struct __attribute__((packed)) StoredStage { uint32_t threshold; uint32_t color; uint8_t flags; };
 struct __attribute__((packed)) StoredPreset { uint32_t magic; uint32_t sequence; uint8_t schema; uint8_t stageCount; uint32_t duration; StoredStage stages[MAX_STAGES]; uint16_t checksum; };
+struct __attribute__((packed)) LegacyStoredPreset { uint32_t magic; uint32_t sequence; uint8_t schema; uint8_t stageCount; uint32_t duration; StoredStage stages[LEGACY_MAX_STAGES]; uint16_t checksum; };
 struct ButtonState { uint8_t pin; bool lastReading; bool stableReading; uint32_t changedAt; uint32_t pressedAt; bool longReported; };
 
 Adafruit_NeoPixel pixel(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -53,14 +55,16 @@ uint8_t cobsDecode(const uint8_t* input, uint8_t length, uint8_t* output) { uint
 void sendFrame(uint8_t type, uint32_t requestId, const uint8_t* payload = 0, uint8_t payloadLength = 0) { uint8_t raw[MAX_RAW_FRAME], wire[MAX_ENCODED_FRAME]; uint8_t length = 12 + payloadLength; raw[0] = 0x54; raw[1] = 0x4C; raw[2] = PROTOCOL_VERSION; raw[3] = type; write32(raw + 4, requestId); write16(raw + 8, payloadLength); if (payloadLength) memcpy(raw + 10, payload, payloadLength); write16(raw + 10 + payloadLength, crc16Bytes(raw, 10 + payloadLength)); uint8_t wireLength = cobsEncode(raw, length, wire); Serial.write(wire, wireLength); Serial.write((uint8_t)0); }
 void sendError(uint8_t code, uint32_t requestId = 0) { sendFrame(FRAME_ERROR, requestId, &code, 1); }
 void sendAck(uint32_t requestId) { uint8_t payload[4]; write32(payload, appliedRevision); sendFrame(FRAME_ACK, requestId, payload, sizeof(payload)); }
-void sendReady(uint32_t requestId = 0) { uint8_t payload[7]; write16(payload, LED_COUNT); payload[2] = 0; payload[3] = 5; payload[4] = 4; payload[5] = 7; payload[6] = 1; sendFrame(FRAME_READY, requestId, payload, sizeof(payload)); }
+void sendReady(uint32_t requestId = 0) { uint8_t payload[7]; write16(payload, LED_COUNT); payload[2] = 0; payload[3] = 5; payload[4] = 5; payload[5] = 7; payload[6] = 1; sendFrame(FRAME_READY, requestId, payload, sizeof(payload)); }
 void sendButton(uint8_t button) { uint8_t payload[5]; payload[0] = button; write32(payload + 1, ++buttonSequence); sendFrame(FRAME_BUTTON, 0, payload, sizeof(payload)); }
 
 uint16_t presetChecksum(const StoredPreset& value) { return crc16Bytes((const uint8_t*)&value, offsetof(StoredPreset, checksum)); }
 bool validPreset(const StoredPreset& value) { if (value.magic != PRESET_MAGIC || value.schema != PRESET_SCHEMA || value.stageCount < 3 || value.stageCount > MAX_STAGES || !value.duration || value.checksum != presetChecksum(value)) return false; for (uint8_t i = 0; i < value.stageCount; i++) if (value.stages[i].threshold >= value.duration || (i && value.stages[i].threshold <= value.stages[i - 1].threshold) || (value.stages[i].flags & 3) > BUZZER_REPEAT || (value.stages[i].flags & ~7)) return false; return true; }
+uint16_t legacyPresetChecksum(const LegacyStoredPreset& value) { return crc16Bytes((const uint8_t*)&value, offsetof(LegacyStoredPreset, checksum)); }
+bool validLegacyPreset(const LegacyStoredPreset& value) { if (value.magic != PRESET_MAGIC || value.schema != 1 || value.stageCount < 3 || value.stageCount > LEGACY_MAX_STAGES || !value.duration || value.checksum != legacyPresetChecksum(value)) return false; for (uint8_t i = 0; i < value.stageCount; i++) if (value.stages[i].threshold >= value.duration || (i && value.stages[i].threshold <= value.stages[i - 1].threshold) || (value.stages[i].flags & 3) > BUZZER_REPEAT || (value.stages[i].flags & ~7)) return false; return true; }
 void compiledDefault() { memset(&preset, 0, sizeof(preset)); preset.magic = PRESET_MAGIC; preset.schema = PRESET_SCHEMA; preset.stageCount = 4; preset.duration = 240; uint32_t times[] = {0,60,120,180}, colors[] = {0x0000FF,0xFFFF00,0xFF7B00,0xFF0000}; for (uint8_t i = 0; i < 4; i++) { preset.stages[i].threshold = times[i]; preset.stages[i].color = colors[i]; preset.stages[i].flags = i == 0 ? BUZZER_NONE : i == 3 ? BUZZER_REPEAT : BUZZER_ONCE; } preset.checksum = presetChecksum(preset); }
-void loadPreset() { StoredPreset slots[2]; EEPROM.get(0, slots[0]); EEPROM.get(sizeof(StoredPreset), slots[1]); bool a = validPreset(slots[0]), b = validPreset(slots[1]); if (!a && !b) { compiledDefault(); return; } activeSlot = b && (!a || (int32_t)(slots[1].sequence - slots[0].sequence) > 0); preset = slots[activeSlot]; }
 void persistPreset() { uint8_t target = activeSlot ^ 1; int base = target * sizeof(StoredPreset); preset.magic = PRESET_MAGIC; preset.schema = PRESET_SCHEMA; preset.sequence++; preset.checksum = presetChecksum(preset); uint32_t invalid = 0; EEPROM.put(base, invalid); const uint8_t* bytes = (const uint8_t*)&preset; for (size_t i = 4; i < sizeof(preset); i++) EEPROM.update(base + i, bytes[i]); for (uint8_t i = 0; i < 4; i++) EEPROM.update(base + i, bytes[i]); activeSlot = target; }
+void loadPreset() { StoredPreset slots[2]; EEPROM.get(0, slots[0]); EEPROM.get(sizeof(StoredPreset), slots[1]); bool a = validPreset(slots[0]), b = validPreset(slots[1]); if (a || b) { activeSlot = b && (!a || (int32_t)(slots[1].sequence - slots[0].sequence) > 0); preset = slots[activeSlot]; return; } LegacyStoredPreset legacySlots[2]; EEPROM.get(0, legacySlots[0]); EEPROM.get(sizeof(LegacyStoredPreset), legacySlots[1]); a = validLegacyPreset(legacySlots[0]); b = validLegacyPreset(legacySlots[1]); if (!a && !b) { compiledDefault(); return; } activeSlot = b && (!a || (int32_t)(legacySlots[1].sequence - legacySlots[0].sequence) > 0); LegacyStoredPreset& legacy = legacySlots[activeSlot]; memset(&preset, 0, sizeof(preset)); preset.magic = PRESET_MAGIC; preset.sequence = legacy.sequence; preset.schema = PRESET_SCHEMA; preset.stageCount = legacy.stageCount; preset.duration = legacy.duration; for (uint8_t i = 0; i < legacy.stageCount; i++) preset.stages[i] = legacy.stages[i]; persistPreset(); }
 
 void setStripColor(uint32_t color) { uint32_t value = pixel.Color(color >> 16 & 255, color >> 8 & 255, color & 255); for (uint16_t i = 0; i < LED_COUNT; i++) pixel.setPixelColor(i, value); pixel.show(); displayedColor = color; lastLedFrameMillis = millis(); }
 uint8_t blend(uint8_t from, uint8_t to, uint32_t elapsed, uint16_t duration) { if (!duration || elapsed >= duration) return to; int32_t difference = (int32_t)to - (int32_t)from; return (uint8_t)((int32_t)from + difference * (int32_t)elapsed / (int32_t)duration); }
