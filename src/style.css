@@ -192,7 +192,7 @@ body.live-open { overflow: hidden; }
 .stage-progress-item b, .stage-progress-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stage-progress-item b { color: #b5c8dc; font-size: .84rem; }
 .stage-progress-item small { margin-top: 5px; color: #61758e; font-size: .78rem; }
-.control-zone { display: flex; flex-direction: column; align-items: center; }
+.control-zone { position: relative; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .player-controls { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .player-button { display: grid; width: 68px; height: 56px; padding: 8px; place-items: center; border: 1px solid rgba(169, 194, 225, .2); border-radius: 12px; background: rgba(116, 186, 255, .08); color: #c9e5ff; }
 .player-button > span { font-size: 1.8rem; line-height: 1; }
@@ -253,7 +253,7 @@ body.live-open { overflow: hidden; }
 .preset-transfer-message { min-height: 20px; margin: 0 0 12px; color: #9fcdf6; font-size: .8rem; }
 .preset-transfer-card > footer { justify-content: flex-end; }
 .preset-transfer-card > footer .secondary-button { margin: 0; }
-.timer-warnings { display: grid; gap: 7px; margin-top: 18px; }
+.timer-warnings { position: absolute; top: 50%; left: 0; display: flex; flex-direction: column; gap: 7px; align-items: flex-start; transform: translateY(-50%); }
 .timer-warning { padding: 9px 11px; border: 1px solid rgba(255, 209, 102, .35); border-radius: 7px; background: rgba(122, 85, 18, .2); color: #ffd98a; font-size: .8rem; line-height: 1.35; }
 .live-layout { position: relative; }
 .transcription-tab { display: grid; width: 72px; height: 60px; padding: 8px; place-items: center; border: 1px solid rgba(116, 186, 255, .32); border-radius: 12px; background: rgba(116, 186, 255, .08); color: #c9e5ff; font-size: .68rem; font-weight: 700; }
@@ -445,6 +445,8 @@ body.live-open { overflow: hidden; }
   .transcript-copy span { display: none; }
   .zone-label { margin-bottom: 8px; }
   .player-controls { gap: 6px; }
+  .control-zone { flex-direction: column; gap: 10px; }
+  .timer-warnings { position: static; width: 100%; flex-direction: column; align-items: stretch; transform: none; }
   .player-button { width: 64px; height: 54px; }
   .player-button-main { width: 72px; height: 60px; }
   .history-overlay { padding: 0; place-items: stretch; }
