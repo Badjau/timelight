@@ -147,6 +147,19 @@ test('production artifact is installable and serves its cached shell offline', a
   await context.close();
 });
 
+test('deployed releases activate automatically without a hard refresh', () => {
+  const serviceWorker = readFileSync(resolve('dist/sw.js'), 'utf8');
+  const index = readFileSync(resolve('dist/index.html'), 'utf8');
+  const mainAssetPath = index.match(/src="\/timelight\/(assets\/main-[^"]+\.js)"/)?.[1];
+
+  assert.ok(mainAssetPath, 'the production page should reference a content-hashed main bundle');
+  const mainAsset = readFileSync(resolve('dist', mainAssetPath), 'utf8');
+
+  assert.match(serviceWorker, /skipWaiting\(\)/, 'the new worker should not remain waiting behind an older release');
+  assert.match(serviceWorker, /clientsClaim\(\)/, 'the new worker should immediately control open clients');
+  assert.match(mainAsset, /location\.reload\(\)/, 'an open client should reload once after the new worker activates');
+});
+
 test('deferred install action prompts once and hides after every terminal state', async () => {
   const { context, page } = await openPage();
   await page.evaluate(() => {

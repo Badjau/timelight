@@ -13,7 +13,10 @@ export default defineConfig({
   },
   plugins: [
     VitePWA({
-      registerType: 'prompt',
+      // Activate each deployed release as soon as the browser discovers it.
+      // The generated client reloads controlled tabs once, so nobody needs to
+      // bypass the service-worker cache manually with Ctrl+F5.
+      registerType: 'autoUpdate',
       manifest: {
         name: 'TimeLight',
         short_name: 'TimeLight',
@@ -51,6 +54,8 @@ export default defineConfig({
         // intentionally do not add runtime network caching.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         navigateFallback: 'index.html',
         navigateFallbackAllowlist: [/^\/timelight\//],
       },
