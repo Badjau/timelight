@@ -5,6 +5,7 @@ import { LiveTranscription } from './live-transcription';
 import './style.css';
 
 type Preset = PresetSnapshot & { id: string; updatedAt: string };
+type PendingImportedPreset = { preset: Preset; duplicateOf: string | null };
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
   readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
@@ -53,6 +54,7 @@ function speakerName(preset: PresetSnapshot): string { return String(preset.spea
 function clubName(preset: PresetSnapshot): string { return String(preset.club ?? '').trim() || 'Club name'; }
 function presetOptionMarkup(preset: Preset, active: boolean): string { return `<button type="button" class="saved-preset ${active ? 'active' : ''}" data-preset="${preset.id}"><span class="preset-option-club">${escapeHtml(clubName(preset))}</span><span class="preset-option-speaker">${escapeHtml(speakerName(preset))}</span><span class="preset-option-name">${escapeHtml(preset.name || 'Untitled preset')}</span></button>`; }
 function samePreset(a: PresetSnapshot, b: PresetSnapshot): boolean { return a.name === b.name && a.speaker === b.speaker && a.club === b.club && a.duration === b.duration && JSON.stringify(a.stages) === JSON.stringify(b.stages); }
+function samePresetIdentity(a: PresetSnapshot, b: PresetSnapshot): boolean { return a.name === b.name && a.speaker === b.speaker && a.club === b.club; }
 
 let presets = loadPresets();
 let history = loadHistory();
@@ -66,6 +68,7 @@ let historyDateTo = '';
 let historySearchRefreshTimer: number | undefined;
 let presetTransferOpen = false;
 let presetTransferMessage = '';
+let pendingImportedPresets: PendingImportedPreset[] | null = null;
 let current: Preset = structuredClone(presets[0] ?? starter);
 let revertTarget: Preset = structuredClone(current);
 // Keep this as the stage object, rather than its array index, so reordering a
@@ -108,10 +111,16 @@ function historyModalMarkup(): string { const presetsInHistory = [...new Set(his
 function refreshHistoryContents(): void { const rows = displayedHistory(); const tbody = document.querySelector<HTMLTableSectionElement>('#history-overlay tbody'); if (tbody) tbody.innerHTML = historyRowsMarkup(rows); const footer = document.querySelector<HTMLElement>('#history-overlay footer'); if (footer) footer.innerHTML = `<span>${rows.length} of ${history.length} entries</span><button type="button" class="secondary-button" id="export-history" ${rows.length ? '' : 'disabled'}>Export CSV</button>`; }
 
 function presetTransferModalMarkup(): string {
-  const rows = presets.length
-    ? presets.map((preset) => `<label class="preset-transfer-item"><input type="checkbox" data-export-preset value="${escapeHtml(String(preset.id))}" checked><span><strong>${escapeHtml(preset.name || 'Untitled preset')}</strong><small>${escapeHtml(clubName(preset))} · ${escapeHtml(speakerName(preset))}</small></span></label>`).join('')
-    : '<p class="preset-transfer-empty">There are no saved presets to export yet.</p>';
-  return `<div class="preset-transfer-overlay" id="preset-transfer-overlay" ${presetTransferOpen ? '' : 'hidden'}><section class="preset-transfer-card" role="dialog" aria-modal="true" aria-labelledby="preset-transfer-title"><header><div><h2 id="preset-transfer-title">Import or export presets</h2><p>Select the presets to include in a portable JSON file.</p></div><button type="button" class="history-close" id="preset-transfer-close" aria-label="Close preset import and export">&times;</button></header><div class="preset-transfer-list">${rows}</div><p class="preset-transfer-message" id="preset-transfer-message" role="status" aria-live="polite">${escapeHtml(presetTransferMessage)}</p><footer><button type="button" class="secondary-button" id="import-presets">Import JSON</button><input type="file" id="preset-import-file" accept="application/json,.json" hidden><button type="button" class="primary-button" id="export-presets" ${presets.length ? '' : 'disabled'}>Export selected</button></footer></section></div>`;
+  const reviewingImport = pendingImportedPresets !== null;
+  const transferPresets = pendingImportedPresets?.map(({ preset }) => preset) ?? presets;
+  const duplicateTargets = new Map(pendingImportedPresets?.map(({ preset, duplicateOf }) => [preset.id, duplicateOf] as const) ?? []);
+  const description = reviewingImport ? 'Select the imported presets to save.' : 'Select the presets to include in a portable JSON file.';
+  const emptyMessage = reviewingImport ? 'The imported file does not contain any presets.' : 'There are no saved presets to export yet.';
+  const importButtonLabel = reviewingImport ? 'Save import' : 'Import JSON';
+  const rows = transferPresets.length
+    ? transferPresets.map((preset) => { const duplicate = duplicateTargets.get(preset.id) !== null && duplicateTargets.has(preset.id); return `<label class="preset-transfer-item ${duplicate ? 'is-duplicate' : ''}"><input type="checkbox" data-export-preset ${reviewingImport ? 'data-import-preset' : ''} value="${escapeHtml(String(preset.id))}" checked><span><strong>${escapeHtml(preset.name || 'Untitled preset')}</strong><small>${escapeHtml(clubName(preset))} · ${escapeHtml(speakerName(preset))}</small>${duplicate ? '<em class="preset-duplicate-label">Duplicate — saving will update the existing preset</em>' : ''}</span></label>`; }).join('')
+    : `<p class="preset-transfer-empty">${emptyMessage}</p>`;
+  return `<div class="preset-transfer-overlay" id="preset-transfer-overlay" ${presetTransferOpen ? '' : 'hidden'}><section class="preset-transfer-card" role="dialog" aria-modal="true" aria-labelledby="preset-transfer-title"><header><div><h2 id="preset-transfer-title">Import or export presets</h2><p>${description}</p></div><button type="button" class="history-close" id="preset-transfer-close" aria-label="Close preset import and export">&times;</button></header><div class="preset-transfer-list">${rows}</div><p class="preset-transfer-message" id="preset-transfer-message" role="status" aria-live="polite">${escapeHtml(presetTransferMessage)}</p><footer><button type="button" class="secondary-button" id="import-presets">${importButtonLabel}</button><input type="file" id="preset-import-file" accept="application/json,.json" hidden><button type="button" class="primary-button" id="export-presets" ${presets.length && !reviewingImport ? '' : 'disabled'}>Export selected</button></footer></section></div>`;
 }
 
 function closePresetTransfer(): void { presetTransferOpen = false; const overlay = document.querySelector<HTMLElement>('#preset-transfer-overlay'); if (overlay) overlay.hidden = true; }
@@ -123,6 +132,34 @@ function exportSelectedPresets(): void {
   const payload = { format: 'timelight-presets', version: 1, exportedAt: new Date().toISOString(), presets: selected };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
   const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `timelight-presets-${new Date().toISOString().slice(0, 10)}.json`; link.click(); window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
+}
+function saveImportedPresets(): void {
+  if (!pendingImportedPresets) return;
+  const ids = new Set([...document.querySelectorAll<HTMLInputElement>('[data-import-preset]:checked')].map((input) => input.value));
+  const selected = pendingImportedPresets.filter(({ preset }) => ids.has(preset.id));
+  if (!selected.length) {
+    presetTransferMessage = 'Select at least one imported preset to save.';
+    const message = document.querySelector('#preset-transfer-message'); if (message) message.textContent = presetTransferMessage;
+    return;
+  }
+  const updatedAt = new Date().toISOString();
+  const nextPresets = [...presets];
+  const additions: Preset[] = [];
+  selected.forEach(({ preset, duplicateOf }) => {
+    if (duplicateOf === null) { additions.push(preset); return; }
+    const savedIndex = nextPresets.findIndex((savedPreset) => savedPreset.id === duplicateOf);
+    if (savedIndex >= 0) { nextPresets[savedIndex] = { ...preset, id: nextPresets[savedIndex].id, updatedAt }; return; }
+    const additionIndex = additions.findIndex((addedPreset) => addedPreset.id === duplicateOf);
+    if (additionIndex >= 0) additions[additionIndex] = { ...preset, id: additions[additionIndex].id, updatedAt };
+    else additions.push(preset);
+  });
+  presets = [...additions, ...nextPresets];
+  persistPresets();
+  pendingImportedPresets = null;
+  const updatedCount = selected.filter(({ duplicateOf }) => duplicateOf !== null).length;
+  presetTransferMessage = `Saved ${selected.length} imported preset${selected.length === 1 ? '' : 's'}${updatedCount ? `, updating ${updatedCount} duplicate${updatedCount === 1 ? '' : 's'}` : ''}.`;
+  presetTransferOpen = true;
+  render();
 }
 function importedPreset(value: unknown, usedIds: Set<string>): Preset {
   if (!value || typeof value !== 'object') throw new Error('Every preset must be a JSON object.');
@@ -158,10 +195,18 @@ async function importPresetFile(file: File): Promise<void> {
     const values = Array.isArray(parsed) ? parsed : (parsed as { presets?: unknown })?.presets;
     if (!Array.isArray(values) || !values.length) throw new Error('The file does not contain any presets.');
     if (values.length > 200) throw new Error('A preset file can contain at most 200 presets.');
-    const usedIds = new Set(presets.map((preset) => preset.id));
+    const usedIds = new Set([...presets, ...(pendingImportedPresets ?? []).map(({ preset }) => preset)].map((preset) => preset.id));
     const imported = values.map((value) => importedPreset(value, usedIds));
-    presets = [...imported, ...presets]; persistPresets();
-    presetTransferMessage = `Imported ${imported.length} preset${imported.length === 1 ? '' : 's'}.`;
+    const seenImported: PendingImportedPreset[] = [];
+    pendingImportedPresets = imported.map((preset) => {
+      const existingDuplicate = presets.find((savedPreset) => samePresetIdentity(savedPreset, preset));
+      const importedDuplicate = seenImported.find((seenPreset) => samePresetIdentity(seenPreset.preset, preset));
+      const duplicateOf = existingDuplicate?.id ?? importedDuplicate?.preset.id ?? null;
+      const pending = { preset, duplicateOf };
+      seenImported.push(pending);
+      return pending;
+    });
+    presetTransferMessage = `Imported ${imported.length} preset${imported.length === 1 ? '' : 's'} for review. Select which to save.`;
     presetTransferOpen = true; render();
   } catch (error) {
     presetTransferMessage = error instanceof SyntaxError ? 'The selected file is not valid JSON.' : error instanceof Error ? error.message : 'The presets could not be imported.';
@@ -358,9 +403,9 @@ function bindEvents(): void {
   document.querySelector('#preset-transfer-close')?.addEventListener('click', closePresetTransfer);
   document.querySelector('#preset-transfer-overlay')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closePresetTransfer(); });
   document.querySelector('#export-presets')?.addEventListener('click', exportSelectedPresets);
-  document.querySelector('#import-presets')?.addEventListener('click', () => document.querySelector<HTMLInputElement>('#preset-import-file')?.click());
+  document.querySelector('#import-presets')?.addEventListener('click', () => { if (pendingImportedPresets) saveImportedPresets(); else document.querySelector<HTMLInputElement>('#preset-import-file')?.click(); });
   document.querySelector('#preset-import-file')?.addEventListener('change', (event) => { const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (file) void importPresetFile(file); input.value = ''; });
-  document.querySelector('.preset-transfer-list')?.addEventListener('change', () => { const button = document.querySelector<HTMLButtonElement>('#export-presets'); if (button) button.disabled = !document.querySelector('[data-export-preset]:checked'); });
+  document.querySelector('.preset-transfer-list')?.addEventListener('change', () => { const button = document.querySelector<HTMLButtonElement>('#export-presets'); if (button && !pendingImportedPresets) button.disabled = !document.querySelector('[data-export-preset]:checked'); });
   document.querySelector('#preset-picker-toggle')?.addEventListener('click', () => { const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (!menu || !toggle) return; menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
   document.querySelector('#timer-preset-toggle')?.addEventListener('click', () => { const menu = document.querySelector<HTMLElement>('#timer-preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#timer-preset-toggle'); if (!menu || !toggle) return; menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
   document.querySelectorAll<HTMLButtonElement>('#preset-menu [data-preset]').forEach((button) => button.addEventListener('click', () => selectPreset(button.dataset.preset ?? '')));

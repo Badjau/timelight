@@ -239,11 +239,14 @@ body.live-open { overflow: hidden; }
 .preset-transfer-list { display: grid; gap: 7px; margin: 20px 0 12px; padding: 3px; overflow-y: auto; }
 .preset-transfer-item { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid rgba(169, 194, 225, .13); border-radius: 8px; background: rgba(4, 12, 22, .35); cursor: pointer; }
 .preset-transfer-item:hover { border-color: rgba(116, 186, 255, .32); background: rgba(116, 186, 255, .07); }
+.preset-transfer-item.is-duplicate { border-color: rgba(245, 184, 92, .38); background: rgba(245, 184, 92, .07); }
+.preset-transfer-item.is-duplicate:hover { border-color: rgba(245, 184, 92, .58); background: rgba(245, 184, 92, .11); }
 .preset-transfer-item input { width: 17px; height: 17px; margin: 0; flex: 0 0 auto; accent-color: #5ca5e7; }
 .preset-transfer-item span { min-width: 0; }
 .preset-transfer-item strong, .preset-transfer-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preset-transfer-item strong { color: #dcecff; font-size: .88rem; }
 .preset-transfer-item small { margin-top: 4px; color: #71859e; font-size: .74rem; font-weight: 500; }
+.preset-duplicate-label { display: block; margin-top: 4px; color: #f0c477; font-size: .7rem; font-style: normal; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .preset-transfer-empty { margin: 20px 0 12px; padding: 28px 14px; border: 1px dashed rgba(169, 194, 225, .16); border-radius: 8px; color: #71859e; text-align: center; }
 .preset-transfer-message { min-height: 20px; margin: 0 0 12px; color: #9fcdf6; font-size: .8rem; }
 .preset-transfer-card > footer { justify-content: flex-end; }
