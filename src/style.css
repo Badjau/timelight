@@ -154,7 +154,7 @@ body.live-open { overflow: hidden; }
 .live-header h2 { order: 3; margin: 0; color: color-mix(in srgb, #eff6ff, transparent 42%); font-size: 1.15rem; font-weight: 650; }
 .live-speaker { display: block; order: 2; margin: 0 0 3px; color: #f6fbff; font-size: clamp(1.7rem, 3.5vw, 3rem); font-weight: 750; letter-spacing: -.05em; line-height: 1.05; overflow-wrap: anywhere; text-align: center; }
 .live-club { display: block; order: 1; margin-bottom: 3px; color: #9fcdf6; font-size: .82rem; font-weight: 750; letter-spacing: .08em; overflow-wrap: anywhere; text-transform: uppercase; }
-.timer-preset-picker { order: 1; width: min(100%, 360px); margin: 0 auto 10px; }
+.timer-preset-picker { order: 1; width: min(100%, 520px); margin: 0 auto 10px; }
 .timer-preset-toggle { position: relative; display: grid; width: 100%; min-width: 0; padding: 7px 36px; justify-items: center; border: 1px solid rgba(116, 186, 255, .3); border-radius: 8px; background: rgba(6, 15, 27, .55); color: #eff6ff; text-align: center; }
 .timer-preset-toggle:hover { border-color: rgba(116, 186, 255, .62); background: rgba(116, 186, 255, .1); }
 .timer-preset-toggle:disabled { cursor: not-allowed; }
@@ -181,7 +181,7 @@ body.live-open { overflow: hidden; }
 .timer-checkpoint.is-passed, .timer-checkpoint.is-active { color: #cfe5f8; }
 .timer-checkpoint.is-active b { color: #f4f9ff; }
 .timer-checkpoint.is-active .timer-checkpoint-dot { box-shadow: 0 0 0 3px #eaf5ff, 0 0 16px var(--stage-color); }
-.stage-progress { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
+.stage-progress { display: grid; grid-template-columns: repeat(var(--stage-count, 5), minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
 .stage-progress-item { min-width: 0; padding: 7px 8px 8px; border: 1px solid color-mix(in srgb, var(--stage-color), transparent 58%); border-radius: 10px; background: color-mix(in srgb, var(--stage-color), #08111f 84%); opacity: .48; transition: opacity .25s, border-color .25s, background .25s; }
 .stage-progress-item.active { border-color: var(--stage-color); background: color-mix(in srgb, var(--stage-color), #08111f 76%); opacity: 1; }
 .stage-progress-bar { height: 6px; margin-bottom: 7px; overflow: hidden; border-radius: 99px; background: rgba(255, 255, 255, .88); }
