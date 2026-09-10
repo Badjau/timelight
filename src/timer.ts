@@ -14,6 +14,8 @@ export type PresetSnapshot = {
   name: string;
   speaker: string;
   club: string;
+  allottedTimeStart?: number;
+  allottedTimeEnd?: number;
   duration: number;
   stages: Stage[];
   failResultOutput?: string;

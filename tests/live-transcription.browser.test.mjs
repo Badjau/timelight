@@ -96,6 +96,38 @@ test('grace stages are marked and saved as an allotted-time range', async () => 
   await page.close();
 });
 
+test('optional allotted-time range replaces the derived timer history value', async () => {
+  const page = await openTimer();
+  await page.click('#back-to-editor');
+  await page.fill('#allotted-time-from-minutes', '01');
+  await page.fill('#allotted-time-from-seconds', '00');
+  await page.fill('#allotted-time-to-minutes', '02');
+  await page.fill('#allotted-time-to-seconds', '00');
+  await page.click('#play-preset');
+  await page.click('#local-play');
+  await page.click('#local-stop');
+  await page.click('#back-to-editor');
+  await page.click('#open-history');
+
+  assert.equal(await page.locator('#history-overlay tbody tr').first().locator('td').nth(5).textContent(), '01:00 to 02:00');
+  await page.close();
+});
+
+test('one optional allotted-time value is used by itself', async () => {
+  const page = await openTimer();
+  await page.click('#back-to-editor');
+  await page.fill('#allotted-time-from-minutes', '01');
+  await page.fill('#allotted-time-from-seconds', '30');
+  await page.click('#play-preset');
+  await page.click('#local-play');
+  await page.click('#local-stop');
+  await page.click('#back-to-editor');
+  await page.click('#open-history');
+
+  assert.equal(await page.locator('#history-overlay tbody tr').first().locator('td').nth(5).textContent(), '01:30');
+  await page.close();
+});
+
 test('stop and save confirmation survives timer status refreshes', async () => {
   const page = await openTimer();
   await page.click('#local-play');
