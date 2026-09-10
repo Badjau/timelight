@@ -204,12 +204,14 @@ body.live-open { overflow: hidden; }
 .timer-saved { padding: 9px 11px; border: 1px solid rgba(104, 211, 145, .35); border-radius: 7px; background: rgba(30, 110, 61, .2); color: #91d8aa; font-size: .8rem; }
 .history-overlay { position: fixed; inset: 0; z-index: 30; display: grid; padding: 24px; place-items: center; background: rgba(3, 9, 17, .9); backdrop-filter: blur(8px); }
 .history-overlay[hidden] { display: none; }
-.history-card { display: flex; width: min(100%, 1100px); max-height: calc(100dvh - 48px); padding: 24px; overflow: hidden; flex-direction: column; border: 1px solid rgba(169, 194, 225, .2); border-radius: 14px; background: #0b192a; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+.history-card { display: flex; width: min(100%, 1400px); max-height: calc(100dvh - 40px); padding: 24px; overflow: hidden; flex-direction: column; border: 1px solid rgba(169, 194, 225, .2); border-radius: 14px; background: #0b192a; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
 .history-card > header, .history-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .history-card > header { align-items: flex-start; }
 .history-heading { min-width: 0; flex: 1; }
 .history-card h2 { margin: 0; color: #edf6ff; font-size: 1.35rem; }
-.history-close { width: 36px; height: 36px; padding: 0; border: 1px solid rgba(169, 194, 225, .16); border-radius: 50%; color: #a8bfd7; font-size: 1.5rem; }
+.history-close { display: inline-flex; width: 36px; height: 36px; padding: 0 0 2px; align-items: center; justify-content: center; border: 1px solid rgba(169, 194, 225, .16); border-radius: 50%; background: rgba(6, 15, 27, .55); color: #a8bfd7; font-size: 1.5rem; line-height: 1; }
+.history-close:hover { border-color: rgba(116, 186, 255, .55); background: rgba(116, 186, 255, .12); color: #e8f4ff; }
+.history-close:focus-visible { outline: 2px solid #74baff; outline-offset: 2px; }
 .history-table-wrap { margin: 20px 0; overflow: auto; border: 1px solid rgba(169, 194, 225, .13); border-radius: 9px; }
 .history-card table { width: 100%; min-width: 900px; border-collapse: collapse; color: #c9d8e8; font-size: .82rem; }
 .history-card th, .history-card td { padding: 12px 14px; border-bottom: 1px solid rgba(169, 194, 225, .1); text-align: left; }
