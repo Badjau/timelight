@@ -27,16 +27,17 @@ const presetIcons = {
 } as const;
 const controllerConnectIcon = '<svg class="toolbar-icon controller-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3.5v4M13 3.5v4M5.5 7.5h9v4a4 4 0 0 1-8 0zM10 15.5v2M7.5 17.5h5" /></svg>';
 const defaultStages: Stage[] = [
-  { name: 'Beginning', threshold: 0, color: '#0000ff', blink: false, buzzer: 'none' },
-  { name: 'Approaching', threshold: 60, color: '#ffff00', blink: false, buzzer: 'once' },
-  { name: 'Nearing limit', threshold: 120, color: '#ff7b00', blink: false, buzzer: 'once' },
-  { name: 'Time reached', threshold: 180, color: '#ff0000', blink: false, buzzer: 'repeat' },
+  { name: 'Grace period', threshold: 0, color: '#0000ff', blink: false, grace: true, buzzer: 'once' },
+  { name: 'Speech start', threshold: 15, color: '#00ff00', blink: false, grace: false, buzzer: 'none' },
+  { name: 'Speech halfway point', threshold: 30, color: '#ffff00', blink: false, grace: false, buzzer: 'none' },
+  { name: 'Grace after', threshold: 45, color: '#ff6400', blink: true, grace: true, buzzer: 'once' },
+  { name: 'FAIL', threshold: 60, color: '#ff0000', blink: false, grace: false, buzzer: 'none' },
 ];
 const appRoot = document.querySelector<HTMLDivElement>('#app');
 if (!appRoot) throw new Error('TimeLight app root was not found.');
 const app = appRoot;
 const serial = new ArduinoSerial();
-const starter: Preset = { id: crypto.randomUUID(), name: 'Four-minute speech', speaker: 'Speaker name', club: 'Club name', duration: 240, stages: structuredClone(defaultStages), updatedAt: new Date().toISOString() };
+const starter: Preset = { id: crypto.randomUUID(), name: 'One-minute speech', speaker: 'Speaker name', club: 'Club name', duration: 90, stages: structuredClone(defaultStages), updatedAt: new Date().toISOString() };
 
 function loadPresets(): Preset[] { try { const value = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]'); return Array.isArray(value) ? value.map((preset) => ({ ...preset, club: String(preset?.club ?? '') })) as Preset[] : []; } catch { return []; } }
 function persistPresets(): void { localStorage.setItem(STORAGE_KEY, JSON.stringify(presets)); }
@@ -291,7 +292,7 @@ function bindEvents(): void {
   document.querySelectorAll<HTMLButtonElement>('#preset-menu [data-preset]').forEach((button) => button.addEventListener('click', () => selectPreset(button.dataset.preset ?? '')));
   document.querySelectorAll<HTMLButtonElement>('#timer-preset-menu [data-preset]').forEach((button) => button.addEventListener('click', () => selectPreset(button.dataset.preset ?? '', true)));
   document.querySelector('.editor-card')?.addEventListener('input', () => { saved = false; const speaker = document.querySelector<HTMLInputElement>('#speaker')?.value.trim() || 'Speaker name'; const club = document.querySelector<HTMLInputElement>('#club')?.value.trim() || 'Club name'; const meta = document.querySelector<HTMLElement>('.preset-picker-meta'); if (meta) meta.innerHTML = `<span>${escapeHtml(club)}</span><span>${escapeHtml(speaker)}</span>`; updateEditorActions(); });
-  document.querySelector('#new-preset')?.addEventListener('click', () => { current = { id: crypto.randomUUID(), name: '', speaker: '', club: '', duration: 240, stages: structuredClone(defaultStages), updatedAt: '' }; expandedStage = current.stages[0] ?? null; revertTarget = structuredClone(current); saved = false; render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
+  document.querySelector('#new-preset')?.addEventListener('click', () => { current = { id: crypto.randomUUID(), name: '', speaker: '', club: '', duration: 90, stages: structuredClone(defaultStages), updatedAt: '' }; expandedStage = current.stages[0] ?? null; revertTarget = structuredClone(current); saved = false; render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
   document.querySelector('#duplicate-preset')?.addEventListener('click', () => { syncCurrentFromForm(); current = { ...structuredClone(current), id: crypto.randomUUID(), name: `${current.name || 'Untitled preset'} copy`, updatedAt: '' }; expandedStage = current.stages[0] ?? null; revertTarget = structuredClone(current); saved = false; render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
   document.querySelector('#play-preset')?.addEventListener('click', () => { if (!activeRun) { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } openLiveView(); } else openLiveView(); });
   document.querySelector('#back-to-editor')?.addEventListener('click', closeLiveView); document.querySelector('#live-overlay')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeLiveView(); }); document.querySelector('#save-preset')?.addEventListener('click', savePreset);

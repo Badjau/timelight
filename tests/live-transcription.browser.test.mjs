@@ -217,12 +217,12 @@ test('editor re-renders do not reopen a closed timer modal', async () => {
   await page.mouse.up();
   assert.equal(await page.locator('.stage-drag-ghost').count(), 0);
   assert.notEqual(await page.getAttribute('#live-overlay', 'hidden'), null);
-  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="name"]'), 'Nearing limit');
-  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold-minutes"]'), '01');
-  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold-seconds"]'), '00');
-  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="name"]'), 'Approaching');
-  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-minutes"]'), '02');
-  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-seconds"]'), '00');
+  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="name"]'), 'Speech halfway point');
+  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold-minutes"]'), '00');
+  assert.equal(await page.inputValue('.stage-row:nth-child(2) [data-field="threshold-seconds"]'), '15');
+  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="name"]'), 'Speech start');
+  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-minutes"]'), '00');
+  assert.equal(await page.inputValue('.stage-row:nth-child(3) [data-field="threshold-seconds"]'), '30');
   assert.equal(await page.locator('.stage-row:nth-child(3).is-expanded').count(), 1);
   await page.close();
 });
