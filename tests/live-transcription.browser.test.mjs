@@ -128,6 +128,54 @@ test('one optional allotted-time value is used by itself', async () => {
   await page.close();
 });
 
+test('time inputs pad single digits and replace deleted values with zero', async () => {
+  const page = await openTimer();
+  await page.click('#back-to-editor');
+  const secondStage = page.locator('.stage-row').nth(1);
+  const minutes = secondStage.locator('[data-field="threshold-minutes"]');
+  const seconds = secondStage.locator('[data-field="threshold-seconds"]');
+
+  await minutes.fill('1');
+  await seconds.focus();
+  assert.equal(await minutes.inputValue(), '01');
+  await seconds.fill('1');
+  await page.locator('#club').focus();
+  assert.equal(await seconds.inputValue(), '01');
+  await seconds.fill('');
+  await page.locator('#club').focus();
+  assert.equal(await seconds.inputValue(), '00');
+
+  await page.fill('#allotted-time-from-minutes', '1');
+  await page.locator('#allotted-time-from-seconds').focus();
+  assert.equal(await page.inputValue('#allotted-time-from-minutes'), '01');
+  await page.fill('#allotted-time-from-seconds', '');
+  await page.locator('#club').focus();
+  assert.equal(await page.inputValue('#allotted-time-from-seconds'), '00');
+  await page.close();
+});
+
+test('invalid preset save highlights the responsible inputs and explains why', async () => {
+  const page = await openTimer();
+  await page.click('#back-to-editor');
+  const secondStage = page.locator('.stage-row').nth(1);
+  await secondStage.locator('[data-field="threshold-minutes"]').fill('0');
+  await secondStage.locator('[data-field="threshold-seconds"]').fill('0');
+  await page.click('#save-preset');
+
+  const message = page.locator('#preset-validation');
+  await assert.doesNotReject(() => message.waitFor({ state: 'visible' }));
+  assert.match(await message.textContent(), /Stage 2 must start later than stage 1/);
+  assert.equal(await secondStage.locator('.time-input input').first().evaluate((element) => element.classList.contains('is-invalid')), true);
+  assert.equal(await secondStage.locator('.time-input input').first().getAttribute('aria-invalid'), 'true');
+  assert.equal(await page.locator('.stage-row').first().locator('.time-input input').first().evaluate((element) => element.classList.contains('is-invalid')), true);
+  await secondStage.locator('[data-field="threshold-minutes"]').click();
+  assert.equal(await message.isVisible(), true);
+  assert.equal(await secondStage.locator('.time-input input').first().evaluate((element) => element.classList.contains('is-invalid')), true);
+  await secondStage.locator('[data-field="threshold-seconds"]').fill('16');
+  assert.equal(await message.isHidden(), true);
+  await page.close();
+});
+
 test('stop and save confirmation survives timer status refreshes', async () => {
   const page = await openTimer();
   await page.click('#local-play');

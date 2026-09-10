@@ -48,8 +48,8 @@ function persistHistory(): void { localStorage.setItem(HISTORY_STORAGE_KEY, JSON
 function clock(): TimerClock { return { wallMs: Date.now(), monotonicMs: performance.now() }; }
 function formatTime(seconds: number): string { const safe = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0)); return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`; }
 function formatVariance(seconds: number): string { return `${seconds < 0 ? '-' : ''}${formatTime(Math.abs(seconds))}`; }
-function timeInputMarkup(seconds: number, index: number): string { const [minutes, remainder] = formatTime(seconds).split(':'); return `<div class="time-input" role="group" aria-label="Stage ${index + 1} start time"><input data-field="threshold-minutes" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="${minutes}" aria-label="Minutes" aria-description="Minutes" autocomplete="off" enterkeyhint="next" /><span class="time-separator" aria-hidden="true">:</span><input data-field="threshold-seconds" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" value="${remainder}" aria-label="Seconds" aria-description="Seconds, 0 to 59" autocomplete="off" enterkeyhint="done" /></div>`; }
-function allottedTimeInputMarkup(boundary: 'from' | 'to', seconds?: number): string { const populated = Number.isFinite(seconds); const [minutes, remainder] = populated ? formatTime(seconds!).split(':') : ['', '']; const label = boundary === 'from' ? 'From' : 'To'; return `<div class="time-input allotted-time-input" role="group" aria-label="Allotted time ${boundary}"><input id="allotted-time-${boundary}-minutes" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="${minutes}" placeholder="00" aria-label="${label} minutes" autocomplete="off" enterkeyhint="next" /><span class="time-separator" aria-hidden="true">:</span><input id="allotted-time-${boundary}-seconds" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" value="${remainder}" placeholder="00" aria-label="${label} seconds" aria-description="Seconds, 0 to 59" autocomplete="off" enterkeyhint="done" /></div>`; }
+function timeInputMarkup(seconds: number, index: number): string { const [minutes, remainder] = formatTime(seconds).split(':'); return `<div class="time-input" role="group" aria-label="Stage ${index + 1} start time"><input data-field="threshold-minutes" data-time-part="minutes" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="${minutes}" aria-label="Minutes" aria-description="Minutes" autocomplete="off" enterkeyhint="next" /><span class="time-separator" aria-hidden="true">:</span><input data-field="threshold-seconds" data-time-part="seconds" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" value="${remainder}" aria-label="Seconds" aria-description="Seconds, 0 to 59" autocomplete="off" enterkeyhint="done" /></div>`; }
+function allottedTimeInputMarkup(boundary: 'from' | 'to', seconds?: number): string { const populated = Number.isFinite(seconds); const [minutes, remainder] = populated ? formatTime(seconds!).split(':') : ['', '']; const label = boundary === 'from' ? 'From' : 'To'; return `<div class="time-input allotted-time-input" role="group" aria-label="Allotted time ${boundary}"><input id="allotted-time-${boundary}-minutes" data-time-part="minutes" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="${minutes}" placeholder="00" aria-label="${label} minutes" autocomplete="off" enterkeyhint="next" /><span class="time-separator" aria-hidden="true">:</span><input id="allotted-time-${boundary}-seconds" data-time-part="seconds" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" value="${remainder}" placeholder="00" aria-label="${label} seconds" aria-description="Seconds, 0 to 59" autocomplete="off" enterkeyhint="done" /></div>`; }
 function escapeHtml(value: string): string { return value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character] ?? character)); }
 function speakerName(preset: PresetSnapshot): string { return String(preset.speaker ?? '').trim() || 'Speaker name'; }
 function clubName(preset: PresetSnapshot): string { return String(preset.club ?? '').trim() || 'Club name'; }
@@ -226,6 +226,7 @@ function render(): void {
   const timerPreset = activeRun?.preset ?? current; const name = timerPreset.name || 'Untitled preset'; const speaker = speakerName(timerPreset); const club = clubName(timerPreset);
   const timelineEnd = Math.max(1, timerPreset.stages[timerPreset.stages.length - 1]?.threshold ?? 0);
   app.innerHTML = `<div class="page-shell"><header class="topbar"><div class="title-block"><a class="brand" href="/timelight/" aria-label="TimeLight home"><span class="brand-mark"><span class="lamp lamp-blue"></span><span class="lamp lamp-yellow"></span><span class="lamp lamp-red"></span></span><span>TimeLight</span>${connectionBadgeMarkup()}</a><div class="topbar-actions">${installActionMarkup()}${deviceStatusMarkup()}</div></div></header><main class="wireframe-flow"><section class="wireframe-card editor-card" aria-label="Preset editor"><header class="wireframe-toolbar"><div class="preset-control"><div class="toolbar-actions preset-actions"><button type="button" class="toolbar-button icon-toolbar-button" id="new-preset" title="New preset" aria-label="New preset">${presetIcons.new}</button><button type="button" class="toolbar-button icon-toolbar-button" id="duplicate-preset" title="Duplicate preset" aria-label="Duplicate preset">${presetIcons.duplicate}</button><button type="button" class="toolbar-button icon-toolbar-button revert-button" id="reset-form" title="Revert changes" aria-label="Revert changes" ${saved ? 'hidden' : ''}>${presetIcons.revert}</button><button type="button" class="toolbar-button icon-toolbar-button save-button" id="save-preset" title="Save preset" aria-label="Save preset" ${saved ? 'disabled' : ''}>${presetIcons.save}</button></div><div class="preset-picker"><div class="preset-input-wrap"><input id="preset-name" required maxlength="48" value="${escapeHtml(current.name)}" placeholder="Preset name" aria-label="Preset name" /><button type="button" class="preset-picker-toggle" id="preset-picker-toggle" aria-label="Show saved presets" aria-expanded="false">&#8964;</button></div><span class="preset-picker-meta"><span>${escapeHtml(clubName(current))}</span><span>${escapeHtml(speakerName(current))}</span></span><div class="preset-menu" id="preset-menu" hidden>${presets.length ? `<span class="preset-menu-label">Saved presets</span>${presets.map((preset) => presetOptionMarkup(preset, preset.id === current.id)).join('')}` : '<span class="preset-menu-empty">No saved presets yet</span>'}</div></div></div><div class="toolbar-actions"><button type="button" class="toolbar-button icon-toolbar-button danger-button" id="delete-preset" title="Delete preset" aria-label="Delete preset" ${presets.some((preset) => preset.id === current.id) ? '' : 'hidden'}>&times;</button></div></header><div class="overview-canvas"><div class="overview-layout"><div class="overview-summary"><div class="overview-fields"><label>Speaker name<input id="speaker" required maxlength="48" value="${escapeHtml(current.speaker)}" placeholder="Who is speaking?" /></label><div class="club-allotted-fields"><label>Club name<input id="club" required maxlength="64" value="${escapeHtml(current.club)}" placeholder="Which club?" /></label><label class="allotted-time-field"><span>Allotted time</span><span class="allotted-time-range">${allottedTimeInputMarkup('from', current.allottedTimeStart)}<span class="allotted-range-separator">to</span>${allottedTimeInputMarkup('to', current.allottedTimeEnd)}</span></label></div><label>Total duration<input id="duration" class="time-input" required type="text" inputmode="numeric" maxlength="6" value="${formatTime(current.duration)}" /></label></div></div><div class="stage-overview"><div class="stage-overview-heading"><span>Stages</span><strong id="stage-count">${current.stages.length} of ${MAX_STAGES}</strong></div><div class="stage-list" id="stage-list">${current.stages.map(stageMarkup).join('')}</div><button type="button" class="add-stage" id="add-stage" ${current.stages.length >= MAX_STAGES ? 'disabled' : ''}>+ Add stage</button></div></div></div><footer class="editor-footer"><div class="footer-actions"><button type="button" class="primary-button" id="play-preset">${activeRun ? 'Open timer' : 'Start'} <span>&rarr;</span></button></div></footer></section></main><div class="live-overlay" id="live-overlay" ${liveViewOpen ? '' : 'hidden'}><section class="wireframe-card live-card" id="timer-panel" aria-labelledby="live-title" role="dialog" aria-modal="true"><header class="live-header"><button type="button" class="back-button" id="back-to-editor" aria-label="Back to editor">&larr;</button><div class="live-heading preset-picker timer-preset-picker" id="timer-preset-picker"><button type="button" class="timer-preset-toggle" id="timer-preset-toggle" aria-label="Show timer presets" aria-expanded="false"><span class="live-club" aria-label="Club">${escapeHtml(club)}</span><span class="live-speaker live-speaker-status" aria-label="Speaker">${escapeHtml(speaker)}</span><h2 id="live-title">${escapeHtml(name)}</h2><span class="timer-preset-chevron" aria-hidden="true">&#8964;</span></button><div class="preset-menu timer-preset-menu" id="timer-preset-menu" hidden>${presets.length ? `<span class="preset-menu-label">Timer presets</span>${presets.map((preset) => presetOptionMarkup(preset, samePreset(preset, timerPreset))).join('')}` : '<span class="preset-menu-empty">No saved presets yet</span>'}</div></div></header><div class="live-layout"><div class="timer-zone"><div class="timer-display"><span id="timer-value">00:00</span></div><div class="stage-progress" id="stage-progress" style="--stage-count:${timerPreset.stages.length}">${timerPreset.stages.map((stage, index, stages) => `<div class="stage-progress-item" data-progress-index="${index}" style="--stage-color:${stage.color};--next-stage-color:${stages[index + 1]?.color ?? stage.color}"><div class="stage-progress-bar" aria-hidden="true"><span></span></div><b>${escapeHtml(stage.name)}</b><small>${formatTime(stage.threshold)}</small></div>`).join('')}</div></div><div class="control-zone"><div class="player-controls"><button type="button" class="player-button" id="local-reset" aria-label="Reset timer"><span aria-hidden="true">&#8634;</span></button><button type="button" class="player-button player-button-main" id="local-play" aria-label="Play timer"><span id="play-icon" aria-hidden="true">&#9654;</span></button><button type="button" class="player-button" id="local-next-stage" aria-label="Advance to next stage"><span aria-hidden="true">&#9654;&#124;</span></button></div><div class="timer-warnings" id="timer-warnings" aria-live="polite"></div></div></div></section></div></div>`;
+  document.querySelector('.overview-canvas')?.insertAdjacentHTML('beforebegin', '<div class="preset-validation" id="preset-validation" role="alert" aria-live="assertive" hidden></div>');
   document.querySelector('#duration')?.closest('label')?.remove();
   document.querySelector('.timer-display')?.insertAdjacentHTML('afterend', `<div class="timer-timeline" id="timer-timeline" role="progressbar" aria-label="Stage timeline progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="timer-timeline-track" aria-hidden="true"><span class="timer-timeline-fill"></span></div><div class="timer-checkpoints">${timerPreset.stages.map((stage, index) => `<div class="timer-checkpoint ${index === 0 ? 'is-active' : ''}" data-checkpoint-index="${index}" style="--checkpoint-position:${Math.min(100, Math.max(0, stage.threshold / timelineEnd * 100))}%;--stage-color:${stage.color}"><span class="timer-checkpoint-dot" aria-hidden="true"></span><b>${escapeHtml(stage.name)}</b><small>${formatTime(stage.threshold)}</small></div>`).join('')}</div></div>`);
   document.body.classList.toggle('live-open', liveViewOpen);
@@ -281,8 +282,71 @@ function syncCurrentFromForm(): void {
   const duration = durationParts.length === 2 && durationParts.every((part) => /^\d+$/.test(part)) ? Number(durationParts[0]) * 60 + Number(durationParts[1]) : 0;
   current.duration = Math.max(duration, lastStageTime + 30);
 }
-function validCurrent(): boolean { return Boolean(current.name.trim() && current.speaker.trim() && current.club.trim()) && [current.allottedTimeStart, current.allottedTimeEnd].every((value) => value === undefined || (Number.isFinite(value) && value >= 0)) && current.stages.length >= 3 && current.stages.length <= MAX_STAGES && current.stages.every((stage, index) => Number.isFinite(stage.threshold) && stage.threshold >= 0 && (index === 0 || stage.threshold > current.stages[index - 1].threshold)); }
-function showInvalid(): void { document.querySelector('.overview-canvas')?.classList.add('invalid'); window.setTimeout(() => document.querySelector('.overview-canvas')?.classList.remove('invalid'), 1200); }
+type ValidationIssue = { message: string; targets: HTMLElement[] };
+function validationIssues(): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const requiredFields: Array<[string, string]> = [['#preset-name', 'Enter a preset name.'], ['#speaker', 'Enter a speaker name.'], ['#club', 'Enter a club name.']];
+  requiredFields.forEach(([selector, message]) => { const input = document.querySelector<HTMLInputElement>(selector); if (!input?.value.trim()) issues.push({ message, targets: input ? [input] : [] }); });
+
+  (['from', 'to'] as const).forEach((boundary) => {
+    const group = document.querySelector<HTMLElement>(`#allotted-time-${boundary}-minutes`)?.closest<HTMLElement>('.time-input');
+    const minutesInput = group?.querySelector<HTMLInputElement>('[data-time-part="minutes"]');
+    const secondsInput = group?.querySelector<HTMLInputElement>('[data-time-part="seconds"]');
+    const minutes = minutesInput?.value.trim() ?? '';
+    const seconds = secondsInput?.value.trim() ?? '';
+    const invalidParts = [!/^\d*$/.test(minutes) ? minutesInput : null, !/^\d*$/.test(seconds) || Number(seconds || 0) > 59 ? secondsInput : null].filter((input): input is HTMLInputElement => Boolean(input));
+    if ((minutes || seconds) && invalidParts.length) issues.push({ message: `Allotted time ${boundary} must use valid minutes and seconds from 00 to 59.`, targets: invalidParts });
+  });
+
+  const stageTimes: Array<number | null> = [];
+  document.querySelectorAll<HTMLElement>('.stage-row').forEach((row, index) => {
+    const group = row.querySelector<HTMLElement>('.time-input');
+    const minutesInput = group?.querySelector<HTMLInputElement>('[data-time-part="minutes"]');
+    const secondsInput = group?.querySelector<HTMLInputElement>('[data-time-part="seconds"]');
+    const minutes = minutesInput?.value.trim() ?? '';
+    const seconds = secondsInput?.value.trim() ?? '';
+    const invalidParts = [!/^\d+$/.test(minutes) ? minutesInput : null, !/^\d+$/.test(seconds) || Number(seconds) > 59 ? secondsInput : null].filter((input): input is HTMLInputElement => Boolean(input));
+    const valid = invalidParts.length === 0;
+    stageTimes.push(valid ? Number(minutes) * 60 + Number(seconds) : null);
+    if (!valid) issues.push({ message: `Stage ${index + 1} must use valid minutes and seconds from 00 to 59.`, targets: invalidParts });
+  });
+  stageTimes.forEach((time, index) => {
+    if (index > 0 && time !== null && stageTimes[index - 1] !== null && time <= stageTimes[index - 1]!) {
+      const rows = document.querySelectorAll<HTMLElement>('.stage-row');
+      const previousInputs = rows[index - 1]?.querySelectorAll<HTMLElement>('.time-input input') ?? [];
+      const currentInputs = rows[index]?.querySelectorAll<HTMLElement>('.time-input input') ?? [];
+      issues.push({ message: `Stage ${index + 1} must start later than stage ${index}.`, targets: [...previousInputs, ...currentInputs] });
+    }
+  });
+  if (current.stages.length < 3 || current.stages.length > MAX_STAGES) issues.push({ message: `A preset must contain between 3 and ${MAX_STAGES} stages.`, targets: [] });
+  return issues;
+}
+function validCurrent(): boolean { return validationIssues().length === 0; }
+function clearInvalid(): void {
+  document.querySelectorAll<HTMLElement>('.is-invalid').forEach((element) => element.classList.remove('is-invalid'));
+  document.querySelectorAll<HTMLElement>('[aria-invalid="true"]').forEach((element) => element.removeAttribute('aria-invalid'));
+  const message = document.querySelector<HTMLElement>('#preset-validation'); if (message) { message.hidden = true; message.replaceChildren(); }
+}
+function displayInvalid(issues: ValidationIssue[], focusFirst = false): void {
+  issues.forEach((issue) => issue.targets.forEach((target) => { target.classList.add('is-invalid'); target.setAttribute('aria-invalid', 'true'); const row = target.closest<HTMLElement>('.stage-row'); if (row) { row.classList.add('is-expanded'); row.querySelector<HTMLButtonElement>('[data-stage-toggle]')?.setAttribute('aria-expanded', 'true'); } }));
+  const message = document.querySelector<HTMLElement>('#preset-validation');
+  if (message) { message.innerHTML = `<strong>Please fix this preset:</strong><ul>${issues.map((issue) => `<li>${escapeHtml(issue.message)}</li>`).join('')}</ul>`; message.hidden = false; }
+  if (!focusFirst) return;
+  const firstTarget = issues[0]?.targets[0];
+  (firstTarget?.matches('input, select') ? firstTarget : firstTarget?.querySelector<HTMLInputElement>('input, select'))?.focus();
+}
+function refreshInvalid(): void {
+  const message = document.querySelector<HTMLElement>('#preset-validation');
+  if (!message || message.hidden) return;
+  clearInvalid();
+  const issues = validationIssues();
+  if (issues.length) displayInvalid(issues);
+}
+function showInvalid(): void {
+  clearInvalid();
+  displayInvalid(validationIssues(), true);
+  const canvas = document.querySelector('.overview-canvas'); canvas?.classList.add('invalid'); window.setTimeout(() => canvas?.classList.remove('invalid'), 1200);
+}
 function updateEditorActions(): void { const save = document.querySelector<HTMLButtonElement>('#save-preset'); const revert = document.querySelector<HTMLButtonElement>('#reset-form'); if (save) save.disabled = saved; if (revert) revert.hidden = saved; }
 function configuredSnapshot(): PresetSnapshot { syncCurrentFromForm(); return { name: current.name, speaker: current.speaker, club: current.club, ...(Number.isFinite(current.allottedTimeStart) ? { allottedTimeStart: current.allottedTimeStart } : {}), ...(Number.isFinite(current.allottedTimeEnd) ? { allottedTimeEnd: current.allottedTimeEnd } : {}), duration: current.duration, stages: structuredClone(current.stages) }; }
 function reorderStage(from: number, to: number): void { if (from === to || to < 0 || to >= current.stages.length) return; const thresholds = current.stages.map((stage) => stage.threshold); const [stage] = current.stages.splice(from, 1); current.stages.splice(to, 0, stage); current.stages.forEach((item, index) => { item.threshold = thresholds[index]; }); }
@@ -447,6 +511,13 @@ function openHistory(): void {
   document.querySelector<HTMLButtonElement>('#history-close')?.focus();
 }
 
+function cleanTimePart(input: HTMLInputElement, finalize = false): void {
+  input.value = input.value.replace(/\D/g, '').slice(0, input.maxLength > 0 ? input.maxLength : undefined);
+  if (!finalize) return;
+  const value = input.value === '' ? 0 : Number(input.value);
+  input.value = String(input.dataset.timePart === 'seconds' ? Math.min(59, value) : value).padStart(2, '0');
+}
+
 function bindEvents(): void {
   document.querySelector('#open-preset-transfer')?.addEventListener('click', openPresetTransfer);
   document.querySelector('#preset-transfer-close')?.addEventListener('click', closePresetTransfer);
@@ -459,7 +530,10 @@ function bindEvents(): void {
   document.querySelector('#timer-preset-toggle')?.addEventListener('click', () => { const menu = document.querySelector<HTMLElement>('#timer-preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#timer-preset-toggle'); if (!menu || !toggle) return; menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
   document.querySelectorAll<HTMLButtonElement>('#preset-menu [data-preset]').forEach((button) => button.addEventListener('click', () => selectPreset(button.dataset.preset ?? '')));
   document.querySelectorAll<HTMLButtonElement>('#timer-preset-menu [data-preset]').forEach((button) => button.addEventListener('click', () => selectPreset(button.dataset.preset ?? '', true)));
-  document.querySelector('.editor-card')?.addEventListener('input', () => { saved = false; const speaker = document.querySelector<HTMLInputElement>('#speaker')?.value.trim() || 'Speaker name'; const club = document.querySelector<HTMLInputElement>('#club')?.value.trim() || 'Club name'; const meta = document.querySelector<HTMLElement>('.preset-picker-meta'); if (meta) meta.innerHTML = `<span>${escapeHtml(club)}</span><span>${escapeHtml(speaker)}</span>`; updateEditorActions(); });
+  const editor = document.querySelector<HTMLElement>('.editor-card');
+  editor?.addEventListener('input', (event) => { const input = event.target as HTMLInputElement; if (input.matches('[data-time-part]')) cleanTimePart(input); refreshInvalid(); saved = false; const speaker = document.querySelector<HTMLInputElement>('#speaker')?.value.trim() || 'Speaker name'; const club = document.querySelector<HTMLInputElement>('#club')?.value.trim() || 'Club name'; const meta = document.querySelector<HTMLElement>('.preset-picker-meta'); if (meta) meta.innerHTML = `<span>${escapeHtml(club)}</span><span>${escapeHtml(speaker)}</span>`; updateEditorActions(); });
+  editor?.addEventListener('focusin', (event) => { const input = event.target as HTMLInputElement; if (input.matches('[data-time-part]')) input.select(); });
+  editor?.addEventListener('focusout', (event) => { const input = event.target as HTMLInputElement; if (!input.matches('[data-time-part]')) return; cleanTimePart(input, true); input.dispatchEvent(new Event('input', { bubbles: true })); });
   document.querySelector('#new-preset')?.addEventListener('click', () => { current = { id: crypto.randomUUID(), name: '', speaker: '', club: '', duration: 90, stages: structuredClone(defaultStages), updatedAt: '' }; expandedStage = current.stages[0] ?? null; revertTarget = structuredClone(current); saved = false; render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
   document.querySelector('#duplicate-preset')?.addEventListener('click', () => { syncCurrentFromForm(); current = { ...structuredClone(current), id: crypto.randomUUID(), name: `${current.name || 'Untitled preset'} copy`, updatedAt: '' }; expandedStage = current.stages[0] ?? null; revertTarget = structuredClone(current); saved = false; render(); document.querySelector<HTMLInputElement>('#preset-name')?.focus(); });
   document.querySelector('#play-preset')?.addEventListener('click', () => { if (!activeRun) { syncCurrentFromForm(); if (!validCurrent()) { showInvalid(); return; } openLiveView(); } else openLiveView(); });
@@ -498,8 +572,6 @@ function bindEvents(): void {
       if (element) element.textContent = `${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}`;
     }
   });
-  document.querySelector('#stage-list')?.addEventListener('focusin', (event) => { const input = event.target as HTMLInputElement; if (input.dataset.field?.startsWith('threshold-')) input.select(); });
-  document.querySelector('#stage-list')?.addEventListener('focusout', (event) => { const input = event.target as HTMLInputElement; if (!input.dataset.field?.startsWith('threshold-') || !input.value) return; if (input.dataset.field === 'threshold-seconds' && Number(input.value) > 59) input.value = '59'; input.value = input.value.padStart(2, '0'); input.dispatchEvent(new Event('input', { bubbles: true })); });
   document.querySelector('#local-play')?.addEventListener('click', () => { if (!activeRun) dispatch({ type: 'start', preset: configuredSnapshot() }); else dispatch({ type: activeRun.state === 'running' ? 'pause' : 'resume' }); });
   document.querySelector('#local-reset')?.addEventListener('click', () => { dispatch({ type: 'reset' }); render(); openLiveView(); }); document.querySelector('#local-next-stage')?.addEventListener('click', () => dispatch({ type: 'next_stage' }));
   document.querySelector('#local-stop')?.addEventListener('click', stopAndSave);

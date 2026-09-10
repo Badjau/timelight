@@ -77,6 +77,10 @@ button { cursor: pointer; }
 
 .overview-canvas { display: flex; min-height: 0; flex: 1 1 auto; padding: 0; border: 0; border-radius: 0; background: transparent; transition: border-color .2s; }
 .overview-canvas.invalid { border: 0; animation: shake .28s ease-in-out 2; }
+.preset-validation { margin: 12px 0 4px; padding: 10px 12px; border: 1px solid rgba(255, 102, 120, .48); border-radius: 8px; background: rgba(121, 31, 48, .2); color: #ffb2bd; font-size: .78rem; line-height: 1.4; }
+.preset-validation[hidden] { display: none; }
+.preset-validation strong { color: #ffd1d7; }
+.preset-validation ul { margin: 4px 0 0; padding-left: 18px; }
 .overview-layout { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: clamp(18px, 2vw, 26px); }
 .overview-summary { padding: 0; }
 .overview-fields { display: grid; grid-template-columns: minmax(280px, 1.15fr) minmax(220px, .85fr); gap: 12px; margin-top: 0; max-width: 920px; }
@@ -86,9 +90,11 @@ label { display: block; color: #a4b7ce; font-size: .88rem; font-weight: 700; let
 .optional { color: #61758e; font-weight: 400; }
 input, select { width: 100%; margin-top: 8px; padding: 12px 14px; border: 1px solid rgba(169, 194, 225, .16); border-radius: 9px; outline: none; background: rgba(4, 12, 22, .55); color: #e9f2ff; font-size: .98rem; }
 input:focus, select:focus { border-color: #5ca5e7; box-shadow: 0 0 0 3px rgba(92, 165, 231, .1); }
+input.is-invalid, select.is-invalid, .time-input.is-invalid { border-color: #ff6678; background: rgba(121, 31, 48, .18); box-shadow: 0 0 0 3px rgba(255, 102, 120, .12); }
 .time-input { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; min-height: 44px; margin-top: 4px; overflow: hidden; border: 1px solid rgba(169, 194, 225, .2); border-radius: 9px; background: rgba(4, 12, 22, .68); font-variant-numeric: tabular-nums; transition: border-color .18s, box-shadow .18s, background .18s; }
 .time-input:focus-within { border-color: #5ca5e7; background: rgba(8, 22, 38, .9); box-shadow: 0 0 0 3px rgba(92, 165, 231, .12); }
 .stage-fields .time-input input { min-width: 0; height: 42px; margin: 0; padding: 0 6px; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: #f2f7ff; font-size: 1rem; font-weight: 750; letter-spacing: .04em; text-align: center; }
+.time-input input.is-invalid { background: rgba(121, 31, 48, .34); box-shadow: inset 0 0 0 1px #ff6678; color: #ffd1d7; }
 .allotted-time-field { min-width: 0; }
 .allotted-time-range { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 5px; }
 .allotted-time-input { min-width: 0; margin-top: 8px; }
