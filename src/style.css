@@ -58,6 +58,7 @@ button { cursor: pointer; }
 .preset-menu-label, .preset-menu-empty { padding: 7px 9px; color: #71859e; font-size: .75rem; }
 .toolbar-actions { display: flex; align-items: center; gap: 4px; }
 .preset-actions { flex: 0 0 auto; }
+.preset-transfer-button { flex: 0 0 auto; }
 .toolbar-button, .back-button { padding: 12px 14px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #9caec2; font-size: .84rem; font-weight: 700; }
 .toolbar-button:hover, .back-button:hover { border-color: var(--line); background: rgba(116, 186, 255, .08); color: #d8ecff; }
 .toolbar-button span, .primary-button span { margin-left: 5px; color: var(--blue); }
@@ -228,6 +229,25 @@ body.live-open { overflow: hidden; }
 .history-card th button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; text-transform: inherit; }
 .history-card th button:hover { color: #d8ecff; }
 .history-delete { color: #ff9daa; }
+.preset-transfer-overlay { position: fixed; inset: 0; z-index: 35; display: grid; padding: 24px; place-items: center; background: rgba(3, 9, 17, .9); backdrop-filter: blur(8px); }
+.preset-transfer-overlay[hidden] { display: none; }
+.preset-transfer-card { display: flex; width: min(100%, 560px); max-height: calc(100dvh - 48px); padding: 24px; overflow: hidden; flex-direction: column; border: 1px solid rgba(169, 194, 225, .2); border-radius: 14px; background: #0b192a; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+.preset-transfer-card > header, .preset-transfer-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.preset-transfer-card > header { align-items: flex-start; }
+.preset-transfer-card h2 { margin: 0; color: #edf6ff; font-size: 1.35rem; }
+.preset-transfer-card header p { margin: 7px 0 0; color: #829ab3; font-size: .84rem; line-height: 1.45; }
+.preset-transfer-list { display: grid; gap: 7px; margin: 20px 0 12px; padding: 3px; overflow-y: auto; }
+.preset-transfer-item { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid rgba(169, 194, 225, .13); border-radius: 8px; background: rgba(4, 12, 22, .35); cursor: pointer; }
+.preset-transfer-item:hover { border-color: rgba(116, 186, 255, .32); background: rgba(116, 186, 255, .07); }
+.preset-transfer-item input { width: 17px; height: 17px; margin: 0; flex: 0 0 auto; accent-color: #5ca5e7; }
+.preset-transfer-item span { min-width: 0; }
+.preset-transfer-item strong, .preset-transfer-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-transfer-item strong { color: #dcecff; font-size: .88rem; }
+.preset-transfer-item small { margin-top: 4px; color: #71859e; font-size: .74rem; font-weight: 500; }
+.preset-transfer-empty { margin: 20px 0 12px; padding: 28px 14px; border: 1px dashed rgba(169, 194, 225, .16); border-radius: 8px; color: #71859e; text-align: center; }
+.preset-transfer-message { min-height: 20px; margin: 0 0 12px; color: #9fcdf6; font-size: .8rem; }
+.preset-transfer-card > footer { justify-content: flex-end; }
+.preset-transfer-card > footer .secondary-button { margin: 0; }
 .timer-warnings { display: grid; gap: 7px; margin-top: 18px; }
 .timer-warning { padding: 9px 11px; border: 1px solid rgba(255, 209, 102, .35); border-radius: 7px; background: rgba(122, 85, 18, .2); color: #ffd98a; font-size: .8rem; line-height: 1.35; }
 .live-layout { position: relative; }
@@ -419,6 +439,8 @@ body.live-open { overflow: hidden; }
   .player-button-main { width: 72px; height: 60px; }
   .history-overlay { padding: 0; place-items: stretch; }
   .history-card { width: 100%; max-height: 100dvh; padding: 18px 12px; border: 0; border-radius: 0; }
+  .preset-transfer-overlay { padding: 0; place-items: stretch; }
+  .preset-transfer-card { width: 100%; max-height: 100dvh; padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom)); border: 0; border-radius: 0; }
   .history-filters { flex-direction: column; }
   .history-filters input, .history-filters select, .history-filters button { width: 100%; min-width: 0; }
   .timer-zone { min-height: 0; padding: 14px 12px 12px; }

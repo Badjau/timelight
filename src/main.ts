@@ -24,6 +24,7 @@ const presetIcons = {
   send: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4l14 6-14 6 2-6zM5 10h7" /></svg>',
   delete: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11M8 3.5h4l1 2.5H7zM6 6l.6 10.5h6.8L14 6M8.5 8.5v5.5M11.5 8.5v5.5" /></svg>',
   history: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.2 6.2V3.5M4.2 3.5h2.7M4.4 4.1A7 7 0 1 1 3 11"/><path d="M10 6v4.3l3 1.7"/></svg>',
+  transfer: '<svg class="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5v9M6.5 9l3.5 3.5L13.5 9M4 15.5h12" /></svg>',
 } as const;
 const controllerConnectIcon = '<svg class="toolbar-icon controller-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3.5v4M13 3.5v4M5.5 7.5h9v4a4 4 0 0 1-8 0zM10 15.5v2M7.5 17.5h5" /></svg>';
 const defaultStages: Stage[] = [
@@ -63,6 +64,8 @@ let historySort: { key: 'startedAt' | 'presetTitle' | 'stoppedAt'; direction: 'a
 let historyDateFrom = '';
 let historyDateTo = '';
 let historySearchRefreshTimer: number | undefined;
+let presetTransferOpen = false;
+let presetTransferMessage = '';
 let current: Preset = structuredClone(presets[0] ?? starter);
 let revertTarget: Preset = structuredClone(current);
 // Keep this as the stage object, rather than its array index, so reordering a
@@ -104,6 +107,68 @@ function historyRowsMarkup(rows = displayedHistory()): string { return rows.leng
 function historyModalMarkup(): string { const presetsInHistory = [...new Set(history.map((item) => item.presetTitle))].sort(); const arrow = (key: typeof historySort.key) => historySort.key === key ? (historySort.direction === 'asc' ? ' ▲' : ' ▼') : ''; return `<div class="history-overlay" id="history-overlay" ${historyOpen ? '' : 'hidden'}><section class="history-card" role="dialog" aria-modal="true" aria-labelledby="history-title"><header><div class="history-heading"><h2 id="history-title">Timer History</h2><button type="button" class="history-tools-toggle" id="history-tools-toggle" aria-expanded="${historyToolsExpanded}" aria-controls="history-tools"><span>Search</span><span class="history-tools-caret" aria-hidden="true">&#8964;</span></button><div class="history-tools" id="history-tools" ${historyToolsExpanded ? '' : 'hidden'}><div class="history-filters"><input id="history-search" type="search" placeholder="Search club, speaker, or preset title" aria-label="Search timer history" value="${escapeHtml(historySearch)}"><select id="history-preset" aria-label="Filter by preset"><option value="">All presets</option>${presetsInHistory.map((p) => `<option ${p === historyPreset ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')} </select><label>From <input id="history-date-from" type="datetime-local" value="${escapeHtml(historyDateFrom)}"></label><label>To <input id="history-date-to" type="datetime-local" value="${escapeHtml(historyDateTo)}"></label></div></div></div><button type="button" class="history-close" id="history-close" aria-label="Close history">&times;</button></header><div class="history-table-wrap"><table><thead><tr><th><button data-history-sort="presetTitle">Preset title${arrow('presetTitle')}</button></th><th>Club name</th><th>Speaker name</th><th><button data-history-sort="startedAt">Start date &amp; time${arrow('startedAt')}</button></th><th>Total duration</th><th>Allotted Time</th><th><button data-history-sort="stoppedAt">Stop time${arrow('stoppedAt')}</button></th><th>Time remaining</th><th>Result</th><th>Action</th></tr></thead><tbody>${historyRowsMarkup()}</tbody></table></div><footer><span>${displayedHistory().length} of ${history.length} entries</span><button type="button" class="secondary-button" id="export-history" ${displayedHistory().length ? '' : 'disabled'}>Export CSV</button></footer></section></div>`; }
 function refreshHistoryContents(): void { const rows = displayedHistory(); const tbody = document.querySelector<HTMLTableSectionElement>('#history-overlay tbody'); if (tbody) tbody.innerHTML = historyRowsMarkup(rows); const footer = document.querySelector<HTMLElement>('#history-overlay footer'); if (footer) footer.innerHTML = `<span>${rows.length} of ${history.length} entries</span><button type="button" class="secondary-button" id="export-history" ${rows.length ? '' : 'disabled'}>Export CSV</button>`; }
 
+function presetTransferModalMarkup(): string {
+  const rows = presets.length
+    ? presets.map((preset) => `<label class="preset-transfer-item"><input type="checkbox" data-export-preset value="${escapeHtml(String(preset.id))}" checked><span><strong>${escapeHtml(preset.name || 'Untitled preset')}</strong><small>${escapeHtml(clubName(preset))} · ${escapeHtml(speakerName(preset))}</small></span></label>`).join('')
+    : '<p class="preset-transfer-empty">There are no saved presets to export yet.</p>';
+  return `<div class="preset-transfer-overlay" id="preset-transfer-overlay" ${presetTransferOpen ? '' : 'hidden'}><section class="preset-transfer-card" role="dialog" aria-modal="true" aria-labelledby="preset-transfer-title"><header><div><h2 id="preset-transfer-title">Import or export presets</h2><p>Select the presets to include in a portable JSON file.</p></div><button type="button" class="history-close" id="preset-transfer-close" aria-label="Close preset import and export">&times;</button></header><div class="preset-transfer-list">${rows}</div><p class="preset-transfer-message" id="preset-transfer-message" role="status" aria-live="polite">${escapeHtml(presetTransferMessage)}</p><footer><button type="button" class="secondary-button" id="import-presets">Import JSON</button><input type="file" id="preset-import-file" accept="application/json,.json" hidden><button type="button" class="primary-button" id="export-presets" ${presets.length ? '' : 'disabled'}>Export selected</button></footer></section></div>`;
+}
+
+function closePresetTransfer(): void { presetTransferOpen = false; const overlay = document.querySelector<HTMLElement>('#preset-transfer-overlay'); if (overlay) overlay.hidden = true; }
+function openPresetTransfer(): void { syncCurrentFromForm(); presetTransferOpen = true; presetTransferMessage = ''; const overlay = document.querySelector<HTMLElement>('#preset-transfer-overlay'); if (overlay) overlay.hidden = false; document.querySelector<HTMLButtonElement>('#preset-transfer-close')?.focus(); }
+function exportSelectedPresets(): void {
+  const ids = new Set([...document.querySelectorAll<HTMLInputElement>('[data-export-preset]:checked')].map((input) => input.value));
+  const selected = presets.filter((preset) => ids.has(preset.id));
+  if (!selected.length) { presetTransferMessage = 'Select at least one preset to export.'; const message = document.querySelector('#preset-transfer-message'); if (message) message.textContent = presetTransferMessage; return; }
+  const payload = { format: 'timelight-presets', version: 1, exportedAt: new Date().toISOString(), presets: selected };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+  const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `timelight-presets-${new Date().toISOString().slice(0, 10)}.json`; link.click(); window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
+}
+function importedPreset(value: unknown, usedIds: Set<string>): Preset {
+  if (!value || typeof value !== 'object') throw new Error('Every preset must be a JSON object.');
+  const item = value as Record<string, unknown>;
+  const requiredText = (key: 'name' | 'speaker' | 'club', max: number) => { const text = item[key]; if (typeof text !== 'string' || !text.trim() || text.length > max) throw new Error(`Preset ${key} must be between 1 and ${max} characters.`); return text; };
+  if (!Array.isArray(item.stages) || item.stages.length < 3 || item.stages.length > MAX_STAGES) throw new Error(`Each preset must contain 3 to ${MAX_STAGES} stages.`);
+  let previousThreshold = -1;
+  const stages = item.stages.map((value, index): Stage => {
+    if (!value || typeof value !== 'object') throw new Error(`Stage ${index + 1} must be a JSON object.`);
+    const stage = value as Record<string, unknown>;
+    if (typeof stage.name !== 'string' || !stage.name.trim() || stage.name.length > 64) throw new Error(`Stage ${index + 1} has an invalid name.`);
+    if (!Number.isInteger(stage.threshold) || Number(stage.threshold) < 0 || Number(stage.threshold) <= previousThreshold) throw new Error('Stage start times must be non-negative whole seconds in ascending order.');
+    if (typeof stage.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(stage.color)) throw new Error(`Stage ${index + 1} has an invalid color.`);
+    if (!['none', 'once', 'repeat'].includes(String(stage.buzzer))) throw new Error(`Stage ${index + 1} has an invalid buzzer mode.`);
+    if (stage.blink !== undefined && typeof stage.blink !== 'boolean') throw new Error(`Stage ${index + 1} has an invalid blink value.`);
+    if (stage.grace !== undefined && typeof stage.grace !== 'boolean') throw new Error(`Stage ${index + 1} has an invalid grace value.`);
+    previousThreshold = Number(stage.threshold);
+    return { name: stage.name, threshold: previousThreshold, color: stage.color, blink: Boolean(stage.blink), grace: Boolean(stage.grace), buzzer: stage.buzzer as Stage['buzzer'] };
+  });
+  if (!Number.isInteger(item.duration) || Number(item.duration) < 0) throw new Error('Preset duration must be a non-negative whole number of seconds.');
+  let id = typeof item.id === 'string' && item.id.trim() ? item.id : crypto.randomUUID();
+  while (usedIds.has(id)) id = crypto.randomUUID();
+  usedIds.add(id);
+  const preset: Preset = { id, name: requiredText('name', 48), speaker: requiredText('speaker', 48), club: requiredText('club', 64), duration: Number(item.duration), stages, updatedAt: typeof item.updatedAt === 'string' && !Number.isNaN(Date.parse(item.updatedAt)) ? item.updatedAt : new Date().toISOString() };
+  if (typeof item.failResultOutput === 'string' && item.failResultOutput.length <= 80) preset.failResultOutput = item.failResultOutput;
+  return preset;
+}
+async function importPresetFile(file: File): Promise<void> {
+  try {
+    if (file.size > 1_000_000) throw new Error('The preset file is too large.');
+    const parsed: unknown = JSON.parse(await file.text());
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) { const envelope = parsed as Record<string, unknown>; if (envelope.format !== 'timelight-presets' || envelope.version !== 1) throw new Error('This is not a supported TimeLight preset file.'); }
+    const values = Array.isArray(parsed) ? parsed : (parsed as { presets?: unknown })?.presets;
+    if (!Array.isArray(values) || !values.length) throw new Error('The file does not contain any presets.');
+    if (values.length > 200) throw new Error('A preset file can contain at most 200 presets.');
+    const usedIds = new Set(presets.map((preset) => preset.id));
+    const imported = values.map((value) => importedPreset(value, usedIds));
+    presets = [...imported, ...presets]; persistPresets();
+    presetTransferMessage = `Imported ${imported.length} preset${imported.length === 1 ? '' : 's'}.`;
+    presetTransferOpen = true; render();
+  } catch (error) {
+    presetTransferMessage = error instanceof SyntaxError ? 'The selected file is not valid JSON.' : error instanceof Error ? error.message : 'The presets could not be imported.';
+    const message = document.querySelector('#preset-transfer-message'); if (message) message.textContent = presetTransferMessage;
+  }
+}
+
 function render(): void {
   const timerPreset = activeRun?.preset ?? current; const name = timerPreset.name || 'Untitled preset'; const speaker = speakerName(timerPreset); const club = clubName(timerPreset);
   const timelineEnd = Math.max(1, timerPreset.stages[timerPreset.stages.length - 1]?.threshold ?? 0);
@@ -114,10 +179,12 @@ function render(): void {
   const timerPicker = document.querySelector<HTMLElement>('#timer-preset-picker'); if (timerPicker) timerPicker.hidden = false;
   document.querySelector('#local-next-stage')?.insertAdjacentHTML('afterend', '<button type="button" class="player-button stop-button" id="local-stop" aria-label="Stop and save timer" title="Stop and save"><span aria-hidden="true">&#9632;</span></button>');
   app.insertAdjacentHTML('beforeend', historyModalMarkup());
+  app.insertAdjacentHTML('beforeend', presetTransferModalMarkup());
   document.querySelector('.live-layout')?.insertAdjacentHTML('afterbegin', transcription.markup());
   const deleteButton = document.querySelector<HTMLButtonElement>('#delete-preset');
   if (deleteButton) {
     deleteButton.innerHTML = presetIcons.delete;
+    deleteButton.insertAdjacentHTML('beforebegin', `<button type="button" class="toolbar-button icon-toolbar-button preset-transfer-button" id="open-preset-transfer" title="Import or export presets" aria-label="Import or export presets">${presetIcons.transfer}</button>`);
     deleteButton.insertAdjacentHTML('beforebegin', `<button type="button" class="toolbar-button icon-toolbar-button history-button" id="open-history" title="Timer History" aria-label="Open Timer History">${presetIcons.history}</button>`);
     deleteButton.insertAdjacentHTML('beforebegin', `<button type="button" class="toolbar-button icon-toolbar-button" id="send-preset" title="Send preset to controller" aria-label="Send preset to controller" ${serial.supportsStandalonePreset ? '' : 'disabled'}>${presetIcons.send}</button>`);
   }
@@ -287,6 +354,13 @@ function openHistory(): void {
 }
 
 function bindEvents(): void {
+  document.querySelector('#open-preset-transfer')?.addEventListener('click', openPresetTransfer);
+  document.querySelector('#preset-transfer-close')?.addEventListener('click', closePresetTransfer);
+  document.querySelector('#preset-transfer-overlay')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closePresetTransfer(); });
+  document.querySelector('#export-presets')?.addEventListener('click', exportSelectedPresets);
+  document.querySelector('#import-presets')?.addEventListener('click', () => document.querySelector<HTMLInputElement>('#preset-import-file')?.click());
+  document.querySelector('#preset-import-file')?.addEventListener('change', (event) => { const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (file) void importPresetFile(file); input.value = ''; });
+  document.querySelector('.preset-transfer-list')?.addEventListener('change', () => { const button = document.querySelector<HTMLButtonElement>('#export-presets'); if (button) button.disabled = !document.querySelector('[data-export-preset]:checked'); });
   document.querySelector('#preset-picker-toggle')?.addEventListener('click', () => { const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (!menu || !toggle) return; menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
   document.querySelector('#timer-preset-toggle')?.addEventListener('click', () => { const menu = document.querySelector<HTMLElement>('#timer-preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#timer-preset-toggle'); if (!menu || !toggle) return; menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
   document.querySelectorAll<HTMLButtonElement>('#preset-menu [data-preset]').forEach((button) => button.addEventListener('click', () => selectPreset(button.dataset.preset ?? '')));
@@ -392,5 +466,5 @@ window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault
 window.matchMedia('(display-mode: standalone)').addEventListener('change', () => { if (standaloneLaunch()) deferredInstallPrompt = null; updateInstallUi(); });
 document.addEventListener('visibilitychange', () => { void syncWakeLock(); updateWarnings(); });
 window.addEventListener('click', (event) => { const target = event.target as Node; const picker = document.querySelector('.preset-picker'); const timerPicker = document.querySelector('.timer-preset-picker'); if (picker?.contains(target) || timerPicker?.contains(target)) return; const menu = document.querySelector<HTMLElement>('#preset-menu'); const toggle = document.querySelector<HTMLButtonElement>('#preset-picker-toggle'); if (menu && toggle) { menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } const timerMenu = document.querySelector<HTMLElement>('#timer-preset-menu'); const timerToggle = document.querySelector<HTMLButtonElement>('#timer-preset-toggle'); if (timerMenu && timerToggle) { timerMenu.hidden = true; timerToggle.setAttribute('aria-expanded', 'false'); } });
-window.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (historyOpen) closeHistory(); else closeLiveView(); });
+window.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; if (presetTransferOpen) closePresetTransfer(); else if (historyOpen) closeHistory(); else closeLiveView(); });
 registerSW({ immediate: true, onOfflineReady: () => { shellReady = true; updateConnectionUi(); }, onNeedRefresh: () => { document.body.dataset.updateWaiting = 'true'; } });
