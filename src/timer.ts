@@ -20,6 +20,9 @@ export type PresetSnapshot = {
 };
 
 export function isGraceStage(stage: Pick<Stage, 'name' | 'grace'>): boolean {
+  // An explicit checkbox value is authoritative. Keep the name fallback for
+  // older imported presets that did not store a grace flag at all.
+  if (stage.grace === false) return false;
   return Boolean(stage.grace) || /(?:^|\W)grace(?:$|\W)/i.test(stage.name);
 }
 

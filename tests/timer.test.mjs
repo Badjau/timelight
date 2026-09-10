@@ -25,6 +25,7 @@ test('allotted time excludes every stage whose name contains the word grace', ()
   assert.equal(timer.allottedTime(gracePreset, 300), 225);
   assert.equal(timer.allottedTime({ ...gracePreset, stages: [{ ...gracePreset.stages[0], name: 'Disgrace', threshold: 0 }, ...gracePreset.stages.slice(1)] }, 300), 255);
   assert.equal(timer.allottedTime({ ...preset, stages: preset.stages.map((stage, index) => index === 1 ? { ...stage, grace: true } : stage) }, 8), 3);
+  assert.equal(timer.allottedTime({ ...preset, duration: 10, stages: [{ ...preset.stages[0], name: 'Grace period', grace: false }, ...preset.stages.slice(1)] }, 10), 10);
 });
 
 test('fake clock covers start, thresholds, pause, resume, and elapsed beyond duration', () => {
